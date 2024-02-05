@@ -1,6 +1,5 @@
 import os
-from sklearn.decomposition
-import FastICA, PCA
+from sklearn.decomposition import FastICA, PCA
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import signal
@@ -31,14 +30,18 @@ mask_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/
 EQA_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/EQA.dem_par" 
 subs_poly_path = 'vU_merge_161023_noBabRas_WGS84_fillednosmooth_wmean_rad2_dist18_ltemin10_polygonised_dissolved.shp' 
 
-with open(frames, "r") as file:
-    frames_list = file.read().splitlines() frames_data = [] for frame in frames_list:
+with open(var[0], "r") as file:
+    frames_list = file.read().splitlines()
+
+frames_data = []
+for frame in frames_list:
     EQA_par_pattern = os.path.join(EQA_dir,f"{frame}_GEOCml*GACOSmask_EQA.dem_par")
     EQA_par_file = glob.glob(EQA_par_pattern)
     cumh5_pattern = os.path.join(cumh5_dir,f"{frame}_GEOCml*GACOSmask_cum.h5")
     cumh5_file = glob.glob(cumh5_pattern)
     mask_pattern = os.path.join(mask_dir,f"{frame}_GEOCml*GACOSmask_coh_03_mask.geo.tif")
     mask_file = glob.glob(mask_pattern)
+
     with h5py.File(cumh5_file[0], 'r') as file:
         imdates = file['imdates']
         imdates = imdates[:]
@@ -46,8 +49,8 @@ with open(frames, "r") as file:
         vel = vel[:]
         cum = file['cum']
         cum = cum[:]
+    
     dates=[]
-
     for date_value in imdates:
         date_string = str(date_value) # Convert int32 to string
         year = int(date_string[:4])
@@ -112,8 +115,9 @@ for index, row in frames_gdf.iterrows():
     frame = row['frame']
     cum_data = row['cum_']
     mask = row['mask_file']
+
     with rasterio.open(mask[0]) as tif:
-    # Read the raster data
+        # Read the raster data
         mask_tif = tif.read(1)
         # Reshape the mask to 1D
         mask_1d = mask_tif.flatten()
@@ -153,7 +157,8 @@ for index, row in frames_gdf.iterrows():
 frames_gdf["S_ft"] = ""
 frames_gdf["restored_signals"] = ""
 # attempt ICA
-ncomponents=5 for index, row in frames_gdf.iterrows():
+ncomponents=5
+for index, row in frames_gdf.iterrows():
     frame = row['frame']
     data = row['cum_no_nans_zeros']
     # set up the transformer (ica). In MATLAB you do the whitening first then the transforming, 
@@ -233,7 +238,7 @@ gdf_polygons = gpd.read_file(subs_poly_path) for index, row in frames_gdf.iterro
 
     # Create a boolean mask for lon and lat arrays
     mask = np.isin(np.arange(lon.size), extracted_indices)
-    list = []
+    subsiding_restored = []
     three_d_list = []
     counter = 0
     
@@ -259,7 +264,7 @@ gdf_polygons = gpd.read_file(subs_poly_path) for index, row in frames_gdf.iterro
 
         # mask cum_with_nans_pix with extracted indices
         masked_cum_with_nans_pix = cum_with_nans_pix * np.where(mask == 0, np.nan, 1)
-        list.append(masked_cum_with_nans_pix)
+        subsiding_restored.append(masked_cum_with_nans_pix)
         
     frames_gdf.at[index, 'subsiding_restored_signals'] = list
     frames_gdf.at[index, "restored_signals_3d"] = three_d_list
@@ -300,6 +305,7 @@ for index, row in frames_gdf.iterrows():
     lat = row['lat']
     lon = row['lon']
     nc_data = row['imdates']
+
     # List to store R-squared values for each trend
     mean_gradient = []
     median_r_squared = []
