@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
+print("importing modules")
 import os
 from sklearn.decomposition import FastICA, PCA
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import signal
-from osgeo
-import gdal
+from osgeo import gdal
 import rasterio
 from scipy.interpolate import interp2d
 from numpy.ma import masked_array
@@ -35,6 +35,7 @@ args = parser.parse_args()
 # Use the provided frame name or default to 'frame1' (or any default frame name)
 frame = args.frame
 
+print("loading files")
 # load files for frames
 cumh5_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/cumh5" 
 mask_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/mask" 
@@ -99,6 +100,7 @@ frames_data.append({
 # Create GeoDataFrame
 frames_gdf = gpd.GeoDataFrame(frames_data, columns=['frame', 'EQA_file', 'cumh5_file', 'mask_file', 'imdates', 'vel', 'cum', 'dates', 'width', 'length', 'corner_lat', 'corner_lon', 'post_lat', 'post_lon','lat', 'lon'])
 
+print("ica prep")
 # cum shape is (t, lat, lon) we want to make an array of (pixels, time) we want to reshape cum 
 # (202, 268, 327) into (202,(268*327))
 frames_gdf["cum_"] = ""
@@ -160,6 +162,7 @@ for index, row in frames_gdf.iterrows():
     frames_gdf.at[index, 'non_zero_ind'] = non_zero_ind
     frames_gdf.at[index, 'non_nan_ind'] = non_nan_ind
 
+print("run ica")
 frames_gdf["S_ft"] = ""
 frames_gdf["restored_signals"] = ""
 # attempt ICA
@@ -201,18 +204,20 @@ for index, row in frames_gdf.iterrows():
     common_indices = np.intersect1d(non_nan_ind, non_zero_ind)
     
     # do some reshaping
-    for i, (restored_signal, ax) in enumerate(zip(restored_signals_outer, axes), start=1):
+    for restored_signal in restored_signals_outer:
         # Create a new matrix with NaNs
         cum_with_nans = np.full((cum.shape[2] * cum.shape[1],), np.nan)
          # Assign values from the restored signal to non-NaN positions
         cum_with_nans[common_indices] = restored_signal[-1]
         cum_with_nans_reshaped = cum_with_nans.reshape((cum.shape[1], cum.shape[2]))
 
+print("checking for linearity")
 # keep only subsiding polygon pixels from cum_nozeros_no_nans convert polygons shape into a 
 # geopandas dataframe
 frames_gdf["subsiding_restored_signals"] = ""
 frames_gdf["restored_signals_3d"] = ""
-gdf_polygons = gpd.read_file(subs_poly_path) for index, row in frames_gdf.iterrows():
+gdf_polygons = gpd.read_file(subs_poly_path)
+for index, row in frames_gdf.iterrows():
     frame = row['frame']
     non_nan_ind = row['non_nan_ind']
     non_zero_ind = row['non_zero_ind']
@@ -281,7 +286,7 @@ for index, row in frames_gdf.iterrows():
     frame = row['frame']
     subsiding_restored = row['subsiding_restored_signals']
     no_nans_store = []
-    for i, restored_signal in enumerate(subsiding_restored, start=0):
+    for restored_signal in subsiding_restored:
 
         # Print how many NaNs there are
         nan_indices = np.argwhere(np.isnan(restored_signal))
@@ -385,6 +390,7 @@ for index, row in frames_gdf.iterrows():
         # Write the data to the GeoTIFF
         dst.write(flipped_data, 1)
 
+    print("storing as netcdf")
     # also save 3d inelastic dataset as nc
     nc_path = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/inelastic_tifs/{}_inelastic_component.nc".format(frame)
     with nc.Dataset(nc_path, 'w') as file:
