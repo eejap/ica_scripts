@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os
 from sklearn.decomposition import FastICA, PCA
 import matplotlib.pyplot as plt
@@ -18,11 +20,20 @@ import pandas as pd
 from shapely.geometry import Point, Polygon
 from rasterio.transform import from_origin
 import netCDF4 as nc
+import argparse
 
 # this is Andrew Watson's library of functions, see 
 # https://github.com/Active-Tectonics-Leeds/interseismic_practical
 import sys
 import interseis_lib as lib
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Process a single frame.')
+parser.add_argument('--frame', type=str, help='Frame name')
+args = parser.parse_args()
+
+# Use the provided frame name or default to 'frame1' (or any default frame name)
+frame = args.frame
 
 # load files for frames
 cumh5_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/cumh5" 
@@ -30,68 +41,63 @@ mask_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/
 EQA_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/EQA.dem_par" 
 subs_poly_path = 'vU_merge_161023_noBabRas_WGS84_fillednosmooth_wmean_rad2_dist18_ltemin10_polygonised_dissolved.shp' 
 
-with open(var[0], "r") as file:
-    frames_list = file.read().splitlines()
-
 frames_data = []
-for frame in frames_list:
-    EQA_par_pattern = os.path.join(EQA_dir,f"{frame}_GEOCml*GACOSmask_EQA.dem_par")
-    EQA_par_file = glob.glob(EQA_par_pattern)
-    cumh5_pattern = os.path.join(cumh5_dir,f"{frame}_GEOCml*GACOSmask_cum.h5")
-    cumh5_file = glob.glob(cumh5_pattern)
-    mask_pattern = os.path.join(mask_dir,f"{frame}_GEOCml*GACOSmask_coh_03_mask.geo.tif")
-    mask_file = glob.glob(mask_pattern)
+EQA_par_pattern = os.path.join(EQA_dir,f"{frame}_GEOCml*GACOSmask_EQA.dem_par")
+EQA_par_file = glob.glob(EQA_par_pattern)
+cumh5_pattern = os.path.join(cumh5_dir,f"{frame}_GEOCml*GACOSmask_cum.h5")
+cumh5_file = glob.glob(cumh5_pattern)
+mask_pattern = os.path.join(mask_dir,f"{frame}_GEOCml*GACOSmask_coh_03_mask.geo.tif")
+mask_file = glob.glob(mask_pattern)
 
-    with h5py.File(cumh5_file[0], 'r') as file:
-        imdates = file['imdates']
-        imdates = imdates[:]
-        vel = file['vel']
-        vel = vel[:]
-        cum = file['cum']
-        cum = cum[:]
+with h5py.File(cumh5_file[0], 'r') as file:
+    imdates = file['imdates']
+    imdates = imdates[:]
+    vel = file['vel']
+    vel = vel[:]
+    cum = file['cum']
+    cum = cum[:]
     
-    dates=[]
-    for date_value in imdates:
-        date_string = str(date_value) # Convert int32 to string
-        year = int(date_string[:4])
-        month = int(date_string[4:6])
-        day = int(date_string[6:])
-        real_date = datetime(year, month, day)
-        dates.append(real_date)
-    width = int(lib.get_par(EQA_par_file[0],'width'))
-    length = int(lib.get_par(EQA_par_file[0],'nlines'))
+dates=[]
+for date_value in imdates:
+    date_string = str(date_value) # Convert int32 to string
+    year = int(date_string[:4])
+    month = int(date_string[4:6])
+    day = int(date_string[6:])
+    real_date = datetime(year, month, day)
+    dates.append(real_date)
+width = int(lib.get_par(EQA_par_file[0],'width'))
+length = int(lib.get_par(EQA_par_file[0],'nlines'))
     
-    # get corner positions
-    corner_lat = float(lib.get_par(EQA_par_file[0], 'corner_lat'))
-    corner_lon = float(lib.get_par(EQA_par_file[0], 'corner_lon'))
+# get corner positions
+corner_lat = float(lib.get_par(EQA_par_file[0], 'corner_lat'))
+corner_lon = float(lib.get_par(EQA_par_file[0], 'corner_lon'))
+# get post spacing (distance between velocity measurements)
+post_lat = float(lib.get_par(EQA_par_file[0],'post_lat'))
+post_lon = float(lib.get_par(EQA_par_file[0],'post_lon'))
 
-    # get post spacing (distance between velocity measurements)
-    post_lat = float(lib.get_par(EQA_par_file[0],'post_lat'))
-    post_lon = float(lib.get_par(EQA_par_file[0],'post_lon'))
-
-    # calculate grid spacings
-    lat = corner_lat + post_lat*np.arange(1,length+1) - post_lat/2
-    lon = corner_lon + post_lon*np.arange(1,width+1) - post_lon/2
-    frames_data.append({
-        'frame': frame,
-        'EQA_file': EQA_par_file,
-        'cumh5_file': cumh5_file,
-        'mask_file': mask_file,
-        'imdates': imdates,
-        'vel': vel,
-        'cum': cum,
-        'dates': dates,
-        'width': width,
-        'length': length,
-        'corner_lat': corner_lat,
-        'corner_lon': corner_lon,
-        'post_lat': post_lat,
-        'post_lon': post_lon,
-        'lat': lat,
-        'lon': lon
-            })
-    # Create GeoDataFrame
-    frames_gdf = gpd.GeoDataFrame(frames_data, columns=['frame', 'EQA_file', 'cumh5_file', 'mask_file', 'imdates', 'vel', 'cum', 'dates', 'width', 'length', 'corner_lat', 'corner_lon', 'post_lat', 'post_lon','lat', 'lon'])
+# calculate grid spacings
+lat = corner_lat + post_lat*np.arange(1,length+1) - post_lat/2
+lon = corner_lon + post_lon*np.arange(1,width+1) - post_lon/2
+frames_data.append({
+    'frame': frame,
+    'EQA_file': EQA_par_file,
+    'cumh5_file': cumh5_file,
+    'mask_file': mask_file,
+    'imdates': imdates,
+    'vel': vel,
+    'cum': cum,
+    'dates': dates,
+    'width': width,
+    'length': length,
+    'corner_lat': corner_lat,
+    'corner_lon': corner_lon,
+    'post_lat': post_lat,
+    'post_lon': post_lon,
+    'lat': lat,
+    'lon': lon
+        })
+# Create GeoDataFrame
+frames_gdf = gpd.GeoDataFrame(frames_data, columns=['frame', 'EQA_file', 'cumh5_file', 'mask_file', 'imdates', 'vel', 'cum', 'dates', 'width', 'length', 'corner_lat', 'corner_lon', 'post_lat', 'post_lon','lat', 'lon'])
 
 # cum shape is (t, lat, lon) we want to make an array of (pixels, time) we want to reshape cum 
 # (202, 268, 327) into (202,(268*327))
