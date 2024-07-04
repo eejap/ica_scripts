@@ -1,7 +1,9 @@
 #!/usr/bin/env python
-print("importing modules") 
+
+print("importing modules")
+
 import os
-from sklearn.decomposition import FastICA, PCA 
+from sklearn.decomposition import FastICA, PCA
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import signal
@@ -11,7 +13,7 @@ from scipy.interpolate import interp2d
 from numpy.ma import masked_array
 import glob
 import h5py
-from datetime import datetime, timedelta 
+from datetime import datetime, timedelta
 import geopandas as gpd
 from scipy.stats import linregress
 from matplotlib.dates import date2num, num2date
@@ -19,60 +21,95 @@ import pandas as pd
 from shapely.geometry import Point, Polygon
 from rasterio.transform import from_origin
 import netCDF4 as nc
+from scipy.optimize import curve_fit
+from scipy.optimize import OptimizeWarning
+import statsmodels.api as sm
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+import shutil
 import argparse
 
-# this is Andrew Watson's library of functions, see 
-# https://github.com/Active-Tectonics-Leeds/interseismic_practical
+# this is Andrew Watson's library of functions, see https://github.com/Active-Tectonics-Leeds/interseismic_practical
 import sys
 import interseis_lib as lib
 
+#---------VARIABLES TO CHANGE--------#
+n_components=4
+out_dir="/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran_data/outputs/"
+data_dir="/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran_data/"
+plot_dir="/home/users/eejap002/ica_scripts/component_plots/all_iran/"
+polygon_dir="/home/users/eejap002/ica_scripts/polygons/"
+approach="temporal" # choose spatial or temporal
+
+print('loading files')
+cumh5_dir = os.path.join(data_dir,"cumh5")
+mask_dir = os.path.join(data_dir,"mask")
+EQA_dir = os.path.join(data_dir,"EQA.dem_par")
+subs_poly_path = os.path.join(data_dir,"vU_merge_161023_noBabRas_WGS84_fillednosmooth_wmean_rad2_dist18_ltemin10_polygonised_dissolved.shp")
+
 # Parse command-line arguments
-parser = argparse.ArgumentParser(description='Process a single frame.')
+parser = argparse.ArgumentParser(description='Process a Frame.')
 parser.add_argument('--frame', type=str, help='Frame name')
 args = parser.parse_args()
+frame= args.frame
 
-# Use the provided frame name or default to 'frame1' (or any default frame name)
-frame = args.frame
-#frame="028A_05385_191813"
-print("loading files")
+#frame='Javin_159A_05389_131313'
+#frame='028A_05385_191813'
 
-# load files for frames
-cumh5_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/cumh5"
-mask_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/mask"
-EQA_dir = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/EQA.dem_par"
-subs_poly_path = 'vU_merge_161023_noBabRas_WGS84_fillednosmooth_wmean_rad2_dist18_ltemin10_polygonised_dissolved.shp'
+#-------------------------------------------#
+# Define the calc_model function
+def calc_model(dph, imdates_ordinal, model):
+    imdates_years = imdates_ordinal / 365.25  # Convert ordinal dates to years
 
-ncomponents = 5
+    # Construct design matrix A based on the selected model
+    A = sm.add_constant(imdates_years)  # Add constant term
 
-output_nc_path = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/inelastic_components/{}_comp/{}_inelastic_component_{}.nc".format(ncomponents, frame, ncomponents)
-output_tif_path = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/inelastic_components/{}_comp/{}_inelastic_component_{}.tif".format(ncomponents, frame, ncomponents)
+    if model == 1:  # Annual+L
+        sin = np.sin(2 * np.pi * imdates_years)
+        cos = np.cos(2 * np.pi * imdates_years)
+        A = np.concatenate((A, sin[:, np.newaxis], cos[:, np.newaxis]), axis=1)
+    elif model == 2:  # Quad
+        A = np.concatenate((A, (imdates_years ** 2)[:, np.newaxis]), axis=1)
+    elif model == 3:  # Annual+Q
+        sin = np.sin(2 * np.pi * imdates_years)
+        cos = np.cos(2 * np.pi * imdates_years)
+        A = np.concatenate((A, (imdates_years ** 2)[:, np.newaxis], sin[:, np.newaxis], cos[:, np.newaxis]),
+                           axis=1)
 
+    # Fit OLS model and predict values
+    result = sm.OLS(dph, A, missing='drop').fit()
+    yvalues = result.predict(A)
+
+    return yvalues
+
+#frame is region if running individual region
 frames_data = []
-EQA_par_pattern = os.path.join(EQA_dir,f"{frame}_GEOCml*GACOSmask_EQA.dem_par")
+
+EQA_par_pattern = os.path.join(EQA_dir,f"*{frame}_GEOCml*GACOS*mask_EQA.dem_par")
 EQA_par_file = glob.glob(EQA_par_pattern)
-cumh5_pattern = os.path.join(cumh5_dir,f"{frame}_GEOCml*GACOSmask_cum.h5")
+cumh5_pattern = os.path.join(cumh5_dir,f"*{frame}_GEOCml*GACOS*mask_cum.h5")
 cumh5_file = glob.glob(cumh5_pattern)
-mask_pattern = os.path.join(mask_dir,f"{frame}_GEOCml*GACOSmask_coh_03_mask.geo.tif") 
+mask_pattern = os.path.join(mask_dir,f"*{frame}_GEOCml*GACOS*mask_coh_03_mask.geo.tif")
 mask_file = glob.glob(mask_pattern)
 
 with h5py.File(cumh5_file[0], 'r') as file:
     imdates = file['imdates']
-    imdates = imdates[:]
+    imdates = imdates[:] 
     vel = file['vel']
     vel = vel[:]
     cum = file['cum']
     cum = cum[:]
-    
+
 dates=[]
 for date_value in imdates:
-    date_string = str(date_value) # Convert int32 to string
+    date_string = str(date_value)  # Convert int32 to string
     year = int(date_string[:4])
     month = int(date_string[4:6])
     day = int(date_string[6:])
     real_date = datetime(year, month, day)
-    dates.append(real_date)
-    width = int(lib.get_par(EQA_par_file[0],'width'))
-    length = int(lib.get_par(EQA_par_file[0],'nlines'))
+    dates.append(real_date)    
+
+width = int(lib.get_par(EQA_par_file[0],'width'))
+length = int(lib.get_par(EQA_par_file[0],'nlines'))
     
 # get corner positions
 corner_lat = float(lib.get_par(EQA_par_file[0], 'corner_lat'))
@@ -85,6 +122,7 @@ post_lon = float(lib.get_par(EQA_par_file[0],'post_lon'))
 # calculate grid spacings
 lat = corner_lat + post_lat*np.arange(1,length+1) - post_lat/2
 lon = corner_lon + post_lon*np.arange(1,width+1) - post_lon/2
+
 frames_data.append({
     'frame': frame,
     'EQA_file': EQA_par_file,
@@ -105,357 +143,666 @@ frames_data.append({
         })
 
 # Create GeoDataFrame
-frames_gdf = gpd.GeoDataFrame(frames_data, columns=['frame', 'EQA_file', 'cumh5_file', 'mask_file', 'imdates', 'vel', 'cum', 'dates', 'width', 'length', 'corner_lat', 'corner_lon', 'post_lat', 'post_lon','lat', 'lon']) 
+frames_gdf = gpd.GeoDataFrame(frames_data, columns=['frame', 'EQA_file', 'cumh5_file', 'mask_file', 'imdates', 'vel', 'cum', 'dates', 'width', 'length', 'corner_lat', 'corner_lon', 'post_lat', 'post_lon','lat', 'lon'])
 
-print("ica prep")
-# cum shape is (t, lat, lon) we want to make an array of (pixels, time) we want to reshape cum (202, 268, 327) 
-# into (202,(268*327))
+print("reshaping array")
+# cum shape is (t, lat, lon)
+# we want to make an array of (time, pixels)
+# we want to reshape cum (202, 268, 327) into (202,(268*327))
+
 frames_gdf["cum_"] = ""
+
 for index, row in frames_gdf.iterrows():
     frame = row['frame']
     cum_data = row['cum']
+
     # Check if 'cum' data is not empty
     if not np.isnan(cum_data).all():
         cum_shape = cum_data.shape
         n_pix = cum_shape[1] * cum_shape[2]
+
         cum_ = np.reshape(cum_data, (cum_shape[0], n_pix))
         frames_gdf.at[index, 'cum_'] = cum_
-        
-# we have cum of shape 202, 268, 327 and mask tif. We want to mask cum with mask tif i.e. make pixels in cum nan 
-# where mask_tif = 0. NaNs are where no data e.g. outside of frame, low coh...
-frames_gdf["cum_masked"] = ""
+
+# we have cum of shape 202, 268, 327 and mask tif. We want to mask cum with mask tif 
+# i.e. make pixels in cum nan where mask_tif = 0. NaNs are where no data e.g. outside of frame, low coh...
+
+print("masking array")
+frames_gdf["cum_masked_2d"] = ""
+frames_gdf["cum_masked_3d"] = ""
+
 for index, row in frames_gdf.iterrows():
     frame = row['frame']
     cum_data = row['cum_']
+    cum_data_3d = row['cum']
     mask = row['mask_file']
+
     with rasterio.open(mask[0]) as tif:
-        # Read the raster data
+    # Read the raster data
         mask_tif = tif.read(1)
+
         # Reshape the mask to 1D
         mask_1d = mask_tif.flatten()
+
         # Tile the first row along the rows to match the shape of asc_cum_
         mask_2d = np.tile(mask_1d, (cum_data.shape[0],1))
         
         # Apply the mask to every element in the 3D array
         cum_masked = cum_data * mask_2d
-        frames_gdf.at[index, 'cum_masked'] = cum_masked
+        cum_masked_3d = cum_masked.reshape(cum_data_3d.shape)
         
-# Find columns (pixels) containing zeros
+        frames_gdf.at[index, 'cum_masked_2d'] = cum_masked
+        frames_gdf.at[index, 'cum_masked_3d'] = cum_masked_3d
+
+# Find columns (pixels) containing only zeros in the t-s and mask them
+print("removing pixels with only zeros")
 frames_gdf["cum_no_nans_zeros"] = ""
 frames_gdf["non_zero_ind"] = ""
 frames_gdf["non_nan_ind"] = ""
 
 for index, row in frames_gdf.iterrows():
     frame = row['frame']
-    cum_masked = row['cum_masked']
+    cum_masked = row['cum_masked_2d']
+
     zero_pixels = np.all(cum_masked == 0, axis=0)
+    
     # Create a new data array without columns (pixels) containing all zeros
     cum_no_zeros = cum_masked[:, ~zero_pixels]
+    
     # Print how many NaNs there are
     nan_indices = np.argwhere(np.isnan(cum_no_zeros))
+
     # find columns containing NaNs and zeroes
     nan_pixels = np.any(np.isnan(cum_no_zeros), axis=0)
+
     # create a new data array without nan columns (pixels)
     cum_no_zeros_no_nans = cum_no_zeros[:, ~nan_pixels]
+
     zero_ind = np.argwhere(zero_pixels).flatten()
     non_zero_ind = np.argwhere(~zero_pixels).flatten()
+
     nans = np.any(np.isnan(cum_masked), axis=0)
     nan_ind = np.argwhere(nans).flatten()
     non_nan_ind = np.argwhere(~nans).flatten()
+
     frames_gdf.at[index, 'cum_no_nans_zeros'] = cum_no_zeros_no_nans
     frames_gdf.at[index, 'non_zero_ind'] = non_zero_ind
     frames_gdf.at[index, 'non_nan_ind'] = non_nan_ind
 
-print("run ica")
-frames_gdf["S_ft"] = "" 
-frames_gdf["restored_signals"] = ""
+# Apply spatial or temporal ICA
+frames_gdf["S_ft"] = ""
+frames_gdf["restored_signals_2d"] = ""
+frames_gdf["restored_signals_3d"] = ""
 
 # attempt ICA
+ncomponents=n_components
+
+print("running ICA")
 for index, row in frames_gdf.iterrows():
     frame = row['frame']
     data = row['cum_no_nans_zeros']
-    # set up the transformer (ica). In MATLAB you do the whitening first then the transforming, here you do it in 
-    # one.
-    ica = FastICA(n_components=ncomponents, whiten="unit-variance")
-    
-    # fit the transformeter to the data array
-    S_ft = ica.fit_transform(data) # fit model and recover signals
-    S_t = ica.transform(data) # recover sources from x using unmixing matrix
-    
-    ## S_ft and S_t results should be identical as ica.transform uses mixing matrix calculated by 
-    ## ica.fit_transform
-    frames_gdf.at[index, 'S_ft'] = S_ft
-    # Take each signal and restore with outer product
-    restored_signals_outer = []
-    for j in range(ncomponents):
-        S_j = np.copy(S_ft)
-        signal = S_j[:,j]
-        mixing = ica.mixing_[:,j]
-        restored_signal_j = np.outer(signal, mixing)
-        
-        # Append the restored signal to the list
-        restored_signals_outer.append(restored_signal_j)
-        
-    frames_gdf.at[index, 'restored_signals'] = restored_signals_outer
-    
-# Find the common indices
-for index, row in frames_gdf.iterrows():
-    frame = row['frame']
     non_nan_ind = row['non_nan_ind']
     non_zero_ind = row['non_zero_ind']
-    restored_signals_outer = row['restored_signals']
     cum = row['cum']
-    lon_plot = row['lon']
-    lat_plot = row['lat']
-    common_indices = np.intersect1d(non_nan_ind, non_zero_ind)
     
-    # do some reshaping
-    for restored_signal in restored_signals_outer:
-        # Create a new matrix with NaNs
-        cum_with_nans = np.full((cum.shape[2] * cum.shape[1],), np.nan)
-         # Assign values from the restored signal to non-NaN positions
-        cum_with_nans[common_indices] = restored_signal[-1]
-        cum_with_nans_reshaped = cum_with_nans.reshape((cum.shape[1], cum.shape[2]))
-print("checking for linearity")
-
-# keep only subsiding polygon pixels from cum_nozeros_no_nans convert polygons shape into a geopandas dataframe
-frames_gdf["subsiding_restored_signals"] = ""
-frames_gdf["restored_signals_3d"] = ""
-gdf_polygons = gpd.read_file(subs_poly_path)
-for index, row in frames_gdf.iterrows():
-    frame = row['frame']
-    non_nan_ind = row['non_nan_ind']
-    non_zero_ind = row['non_zero_ind']
-    restored_signals_outer = row['restored_signals']
-    cum = row['cum']
-    lon_plot = row['lon']
-    lat_plot = row['lat']
-    common_indices = np.intersect1d(non_nan_ind, non_zero_ind)
-    cum_with_nans = np.full((cum.shape[0], cum.shape[1], cum.shape[2]), np.nan)
-    
-    # Create meshgrid of lon and lat
-    lon, lat = np.meshgrid(lon_plot, lat_plot)
-    
-    # Flatten lon and lat
-    lon_1d = lon.flatten()
-    lat_1d = lat.flatten()
-    
-    # Create a GeoDataFrame for the flattened lon and lat
-    geometry = [Point(lon, lat) for lon, lat in zip(lon_1d, lat_1d)]
-    gdf_points = gpd.GeoDataFrame(geometry=geometry, columns=['geometry'])
-    gdf_points.crs = "EPSG:4326"
-    gdf_points['Latitude'] = lat_1d
-    gdf_points['Longitude'] = lon_1d
-    
-    # Perform Spatial Join
-    joined = gpd.sjoin(gdf_points, gdf_polygons, predicate='within')
-    extracted_coordinates = joined[['Latitude', 'Longitude']]
-    extracted_indices = joined.index
-    
-    # Create a boolean mask for lon and lat arrays
-    mask = np.isin(np.arange(lon.size), extracted_indices)
-    subsiding_restored = []
-    three_d_list = []
-    
-    for restored_signal in restored_signals_outer:
-        # Convert common_indices to 3D indices i.e. flat indices into a tuple for 3d array
-        indices_3d = np.unravel_index(common_indices, cum.shape[1:])
-        # Create a copy of cum_with_nans to work with for each restored_signal
-        cum_with_nans_copy = cum_with_nans.copy()
+    if approach == "temporal":
+        data_to_decompose = data.T  # Shape: pixels, time
+        if data.shape[0] > ncomponents and data.shape[1] > ncomponents:
+            # Perform ICA
+            # set up the transformer (ica). In MATLAB you do the whitening first then the transforming, here you do it in one.
+            ica = FastICA(n_components=ncomponents, whiten="unit-variance")
+        	
+            # fit the transformer to the data array
+            S_ft = ica.fit_transform(data_to_decompose) # fit model and recover signals
+            #S_t = ica.transform(data) # recover sources from x using unmixing matrix
+            ## S_ft and S_t results should be identical as ica.transform uses mixing matrix calculated by ica.fit_trcd ansform
         
-        # need to make sure a different time series assigned to timestep
-        for j in range(restored_signal.shape[0]):
-            
-            # Assign values from the restored signal to non-NaN positions
-            cum_with_nans_copy[j, indices_3d[0], indices_3d[1]] = restored_signal[j,:]
+            frames_gdf.at[index, 'S_ft'] = S_ft
         
-        # reshape cum_with_nans into time x pixels
-        cum_with_nans_pix = cum_with_nans_copy.reshape(cum.shape[0], cum.shape[1] * cum.shape[2])
+            # Take each signal and restore with outer product
+            restored_signals_outer = []
+            three_d_list = []
+            for j in range(ncomponents):
+                S_j = np.copy(S_ft)
+                signal = S_j[:,j]
+                mixing = ica.mixing_[:,j]
+                restored_signal_j = np.outer(signal, mixing)
+                
+                # Append the restored signal to the list
+                restored_signals_outer.append(restored_signal_j)
         
-        #reshape cum_with_nans_pix into 3d to save signals
-        restored_signal_3d = cum_with_nans_pix.reshape(cum.shape[0], cum.shape[1], cum.shape[2])
-        three_d_list.append(restored_signal_3d)
+                # Convert common_indices to 3D indices i.e. flat indices into a tuple for 3d array
+                # first find indices common to non nan and non zero for data population
+                common_indices = np.intersect1d(non_nan_ind, non_zero_ind)
         
-        # mask cum_with_nans_pix with extracted indices
-        masked_cum_with_nans_pix = cum_with_nans_pix * np.where(mask == 0, np.nan, 1)
-        subsiding_restored.append(masked_cum_with_nans_pix)
+                # create a shape the same size as original data with nans
+                cum_with_nans = np.full((cum.shape[0], cum.shape[1], cum.shape[2]), np.nan)
         
-    frames_gdf.at[index, 'subsiding_restored_signals'] = subsiding_restored
-    frames_gdf.at[index, "restored_signals_3d"] = three_d_list
+                # Convert common_indices to 3D indices i.e. flat indices into a tuple for 3d array
+                indices_3d = np.unravel_index(common_indices, cum.shape[1:])
+        
+                # Create a copy of cum_with_nans to work with for each restored_signal
+                cum_with_nans_copy = cum_with_nans.copy()
 
-# remove nans and zeros from each subsiding restored signal
-frames_gdf["subsiding_no_nans"] = ""
-for index, row in frames_gdf.iterrows():
-    frame = row['frame']
-    subsiding_restored = row['subsiding_restored_signals']
-    no_nans_store = []
-    for restored_signal in subsiding_restored:
-        # Print how many NaNs there are
-        nan_indices = np.argwhere(np.isnan(restored_signal))
-        # find columns containing NaNs and zeroes
-        nan_pixels = np.any(np.isnan(restored_signal), axis=0)
-        # create a new data array without nan columns (pixels)
-        subsiding_no_nans = restored_signal[:, ~nan_pixels]
-        no_nans_store.append(subsiding_no_nans)
-    frames_gdf.at[index, 'subsiding_no_nans'] = no_nans_store
+                # need to make sure a different time series assigned to timestep ***
+                for m in range(restored_signal_j.shape[1]):
+                   # Assign values from the restored signal to non-NaN positions
+                    cum_with_nans_copy[m, indices_3d[0], indices_3d[1]] = restored_signal_j[:,m]
+                   
+                # for m in range(restored_signal_j.shape[1]):
+                #     # Assign values from the restored signal to non-NaN positions
+                #     cum_with_nans_copy[m, indices_3d[0], indices_3d[1]] = restored_signal_j[:,m]
+        
+                # reshape cum_with_nans into time x pixels
+                cum_with_nans_pix = cum_with_nans_copy.reshape(cum.shape[0], cum.shape[1] * cum.shape[2])
+        
+                #reshape cum_with_nans_pix into 3d to save signals
+                restored_signal_3d = cum_with_nans_pix.reshape(cum.shape[0], cum.shape[1], cum.shape[2])
+                three_d_list.append(restored_signal_3d)
+                
+            frames_gdf.at[index, 'restored_signals_2d'] = restored_signals_outer   
+            frames_gdf.at[index, 'restored_signals_3d'] = three_d_list
+        else:
+            print("Skipping ICA for frame {} because the number of features is not greater than {}.".format(frame, ncomponents))
+    
+    elif approach == "spatial":
+        data_to_decompose = data # Shape: time, pixels
 
-# find most linear!!
-frames_gdf["inelastic_restored_signal_3d"] = ""
-for index, row in frames_gdf.iterrows():
-    frame = row['frame']
-    restored_signals = row['subsiding_no_nans']
-    dates = row['dates']
-    restored_signals_3d = row['restored_signals_3d']
-    restored_signals_full = row['restored_signals']
-    corner_lat = row['corner_lat']
-    corner_lon = row['corner_lon']
-    post_lon = row['post_lon']
-    post_lat = row['post_lat']
-    width = row['width']
-    height = row['length']
-    lat = row['lat']
-    lon = row['lon']
-    nc_data = row['imdates']
-    
-    # List to store R-squared values for each trend
-    mean_gradient = []
-    median_r_squared = []
-    negative_indices = []
-    median_r_squared_negative_gradients = []
-    
-    # Convert dates to numerical values
-    num_dates = date2num(dates)
-    for signal in restored_signals:
-        r_squared_values = []
-        gradient = []
-        # Loop through each trend
-        for i in range(signal.shape[1]):
-            # Create a time array from 0 to 197 (198 time steps)
-            time_steps = dates
-    
-            # Perform linear regression and calculate R-squared
-            slope, _, r_value, _, _ = linregress(num_dates, signal[:,i])
-            # Check if the mean gradient is negative
-            gradient.append(slope)
-    
-            # Append R-squared value to the list
-            r_squared_values.append(r_value**2)
-        # take mean of gradients
-        mean_gradient.append(np.mean(gradient))
-        # take median of r_squared per IC
-        median_r_squared.append(np.median(r_squared_values))
-    print('median_r_squared:', median_r_squared)
-    print('mean_gradient:', mean_gradient)
-    
-    # If mean gradient is negative, find the index of the trend with the maximum R-squared value
-    for i in range(len(mean_gradient)):
-        if mean_gradient[i] < 0:
-            negative_indices.append(i)
-    for n in negative_indices:
-        median_r_squared_negative_gradients.append(median_r_squared[n])
-    max_r_squared_negative_grad = np.max(median_r_squared_negative_gradients)
-    
-    # Find the index of max_median_r_squared_negative in median_r_squared
-    max_index_in_median_r_squared = np.where(median_r_squared == max_r_squared_negative_grad)[0][0]
-    print('index:', max_index_in_median_r_squared)
-    
-    # choose the signal
-    inelastic_signal = restored_signals_3d[max_index_in_median_r_squared]
-    inelastic_signal_subsiding = restored_signals[max_index_in_median_r_squared]
-    inelastic_signal_2d = restored_signals_full[max_index_in_median_r_squared]
-    # to save as tif, choose final timestep of 3d restored signal
-    final_disp = inelastic_signal[-1,:,:]
-    
-    # Flip the data vertically
-    flipped_data = np.flipud(final_disp)
-    # Create a transformation for the GeoTIFF
-    transform = from_origin(lon.min(), lat.min(), post_lon, post_lat)
-    
-    # Create a rasterio dataset and write the inelastic data to it
-    with rasterio.open(output_tif_path, 'w', driver='GTiff', height=height, width=width, count=1, dtype='float32', crs='EPSG:4326', transform=transform) as dst:
-        # Write the data to the GeoTIFF
-        dst.write(flipped_data, 1)
+        if data.shape[1] > ncomponents and data.shape[0] > ncomponents:
+        # Perform ICA
+            # set up the transformer (ica). In MATLAB you do the whitening first then the transforming, here you do it in one.
+            ica = FastICA(n_components=ncomponents, whiten="unit-variance")
+        	
+            # fit the transformer to the data array
+            S_ft = ica.fit_transform(data_to_decompose) # fit model and recover signals
+            #S_t = ica.transform(data) # recover sources from x using unmixing matrix
+            ## S_ft and S_t results should be identical as ica.transform uses mixing matrix calculated by ica.fit_trcd ansform
+        
+            frames_gdf.at[index, 'S_ft'] = S_ft
+        
+            # Take each signal and restore with outer product
+            restored_signals_outer = []
+            three_d_list = []
+            for j in range(ncomponents):
+                S_j = np.copy(S_ft)
+                signal = S_j[:,j]
+                mixing = ica.mixing_[:,j]
+                restored_signal_j = np.outer(signal, mixing)
+                
+                # Append the restored signal to the list
+                restored_signals_outer.append(restored_signal_j)
+        
+                # Convert common_indices to 3D indices i.e. flat indices into a tuple for 3d array
+                # first find indices common to non nan and non zero for data population
+                common_indices = np.intersect1d(non_nan_ind, non_zero_ind)
+        
+                # create a shape the same size as original data with nans
+                cum_with_nans = np.full((cum.shape[0], cum.shape[1], cum.shape[2]), np.nan)
+        
+                # Convert common_indices to 3D indices i.e. flat indices into a tuple for 3d array
+                indices_3d = np.unravel_index(common_indices, cum.shape[1:])
+        
+                # Create a copy of cum_with_nans to work with for each restored_signal
+                cum_with_nans_copy = cum_with_nans.copy()
+                
+                # need to make sure a different time series assigned to timestep
+                for m in range(restored_signal_j.shape[0]):
+                    # Assign values from the restored signal to non-NaN positions
+                    cum_with_nans_copy[m, indices_3d[0], indices_3d[1]] = restored_signal_j[m,:]
+        
+                # reshape cum_with_nans into time x pixels
+                cum_with_nans_pix = cum_with_nans_copy.reshape(cum.shape[0], cum.shape[1] * cum.shape[2])
+        
+                #reshape cum_with_nans_pix into 3d to save signals
+                restored_signal_3d = cum_with_nans_pix.reshape(cum.shape[0], cum.shape[1], cum.shape[2])
+                three_d_list.append(restored_signal_3d)
+                
+            frames_gdf.at[index, 'restored_signals_2d'] = restored_signals_outer   
+            frames_gdf.at[index, 'restored_signals_3d'] = three_d_list
+        else:
+            print("Skipping ICA for frame {} because the number of features is not greater than {}.".format(frame, ncomponents))
 
-    # save the other components to tifs with indices
-    output_directory = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/other_components/{}".format(frame)
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
-
-    # Remove existing GeoTIFF files in the directory
-    for file_name in os.listdir(output_directory):
-        if file_name.endswith(".tif"):
-            file_path = os.path.join(output_directory, file_name)
-            os.remove(file_path)
+if approach == "temporal":
+    # find inelastic component, elastic component, plot things, save nc and tif
+    print("identifying elastic and inelastic components and save outputs")
+    for index, row in frames_gdf.iterrows():
+        frame = row['frame']
+        dates = row['dates']
+        restored_signals_3d = row['restored_signals_3d']
+        restored_signals_2d = row['restored_signals_2d']
+        corner_lat = row['corner_lat']
+        corner_lon = row['corner_lon']
+        post_lon = row['post_lon']
+        post_lat = row['post_lat']
+        width = row['width']
+        height = row['length']
+        lat = row['lat']
+        lon = row['lon']
+        nc_data = row['imdates']
+        Sft = row['S_ft']
     
-    for i, signal in enumerate(restored_signals_3d):
-        if i == max_index_in_median_r_squared:
-             continue # skip saving the signal with the inelastic index
-        final_disp_other = signal[-1,:,:]
-        print(i)
-        flipped_final_disp_other = np.flipud(final_disp_other)
-        path = os.path.join(output_directory, "component_{}.tif".format(i))
-        with rasterio.open(path, 'w', driver='GTiff', height=height, width=width, count=1, dtype='float32', crs='EPSG:4326', transform=transform) as dst:
-            # Write the data to the GeoTIFF
-            dst.write(flipped_final_disp_other, 1)
-
-    print("Storing other components as NetCDF")
-    # Create NetCDF file for other components
-    output_nc_path_other = "/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran/other_components/{}/other_components.nc".format(frame)
-
-    with nc.Dataset(output_nc_path_other, 'w') as file:
-        # Create dimensions
-        file.createDimension('time', restored_signals_3d[0].shape[0])  # Assuming all signals have the same time dimension
-        file.createDimension('latitude', restored_signals_3d[0].shape[1])
-        file.createDimension('longitude', restored_signals_3d[0].shape[2])
-        component_dim = file.createDimension('component', len(restored_signals_3d) - 1)  # -1 to exclude the inelastic component
-
-        # Create variables
-        time_var = file.createVariable('time', 'f4', ('time',))
-        lat_var = file.createVariable('latitude', 'f4', ('latitude',))
-        lon_var = file.createVariable('longitude', 'f4', ('longitude',))
-
-        # Create a variable for each other component
-        component_vars = []
-        for i in range(len(restored_signals_3d) - 1):
-            component_vars.append(file.createVariable(f'component_{i}', 'f4', ('time', 'latitude', 'longitude')))
-
-        # Add data to variables
-        time_data_other = nc_data
-        lat_data_other = lat
-        lon_data_other = lon
-
-        # Assign data to variables
-        time_var[:] = time_data_other
-        lat_var[:] = lat_data_other
-        lon_var[:] = lon_data_other
-
-        # Assign data for each other component to its respective variable
-        non_inelastic_components = []
-        for i, signal in enumerate(restored_signals_3d):
-            if i == max_index_in_median_r_squared:
-                continue  # Skip the inelastic component
-            non_inelastic_components.append(signal)
-        for i, signal_data in enumerate(non_inelastic_components):
-            component_vars[i] = signal_data
+        # Only proceed if there are enough coherent pixels
+        if restored_signals_3d[0].shape[1] >= 20:
+            # List to store R-squared values for each trend
+            mean_gradient = []
+            median_r_squared = []
+            mean_second_derivative = []
+            median_mae = []
     
-    print("storing inelastic as netcdf")
-    # also save 3d inelastic dataset as nc
-    with nc.Dataset(output_nc_path, 'w') as file:
-        # Create dimensions
-        file.createDimension('time', inelastic_signal.shape[0]) # 'None' allows for unlimited size along this dimension
-        file.createDimension('latitude', inelastic_signal.shape[1])
-        file.createDimension('longitude', inelastic_signal.shape[2])
-        # Create variables
-        time_var = file.createVariable('time', 'f4', ('time',))
-        lat_var = file.createVariable('latitude', 'f4', ('latitude',))
-        lon_var = file.createVariable('longitude', 'f4', ('longitude',))
-        data_var = file.createVariable('data', 'f4', ('time', 'latitude', 'longitude'))
-        # add data to variables
-        time_data = nc_data
-        lat_data = lat
-        lon_data = lon
-        data_data = inelastic_signal
-        time_var[:] = time_data
-        lat_var[:] = lat_data
-        lon_var[:] = lon_data
-        data_var[:] = data_data
+            # Convert dates to numerical values
+            num_dates = date2num(dates)
+    
+            for m, signal_0 in enumerate(restored_signals_2d):
+                r_squared_values = []
+                gradient = []
+                second_deriv = []
+                maes = []
+
+                # transpose signal for linear regression etc.
+                signal = signal_0.T
+    
+                # Loop through each trend at each pixel
+                for i in range(signal.shape[1]):
+                    # Perform linear regression and calculate R-squared
+                    slope, _, r_value, _, _ = linregress(num_dates, signal[:, i]) 
+    
+                    # Store the gradient at each pixel
+                    gradient.append(slope)
+    
+                    # Append R-squared value to the list
+                    r_squared_values.append(r_value ** 2)
+    
+                    # Calculate the second derivative using numpy.gradient at each pixel
+                    first_derivative = np.gradient(signal[:, i], num_dates)
+                    second_derivative = np.gradient(first_derivative, num_dates)
+                    second_derivative_mean = np.mean(second_derivative)
+                    second_deriv.append(second_derivative_mean)
+    
+                    # choose model 1 (annual + L) and then calculate fit useing MAE
+                    yvalues = calc_model(signal[:, i], num_dates, 3)
+                    mae_annual = mean_absolute_error(signal[:, i], yvalues)
+                    maes.append(mae_annual)
+                        
+                # take mean of gradients
+                mean_gradient.append(np.mean(gradient))
+    
+                # take median of r_squared per IC
+                median_r_squared.append(np.median(r_squared_values))
+    
+                # find median mae of fit of model and signal
+                median_mae.append(np.median(maes))
+    
+                # take mean of second derivative per IC
+                mean_second_derivative.append(np.mean(second_deriv))
+    
+                # plot components in space and time with parameters
+                fig = f"{frame}_component_{m}.png"
+                fig_directory = os.path.join(plot_dir, approach, f"{n_components}_components", frame)
+    
+                # Check if the directory exists, if not, create it
+                if not os.path.exists(fig_directory):
+                        os.makedirs(fig_directory)
+                
+                # plot components in space and time with parameters
+                plt.figure(figsize=(16,5))
+                plt.subplot2grid((1, 3), (0, 0))
+                plt.plot(dates,signal)
+    
+                # Adding text to the top right of the plot
+                plt.text(0.95, 0.95, f"Gradient: {np.mean(gradient):.4f}\nR Squared: {np.median(r_squared_values):.4f}\nMAE: {np.median(maes):.4f}\nSecond Derivative: {np.mean(second_deriv):.4f}",
+                     horizontalalignment='right',
+                     verticalalignment='top',
+                     transform=plt.gca().transAxes,
+                     bbox=dict(facecolor='white', alpha=0.5))
+                
+                plt.subplot2grid((1, 3), (0, 1))
+                plt.imshow(restored_signals_3d[m][-1,:,:], cmap='viridis', interpolation='none', extent=[np.amin(lon), np.amax(lon), np.amin(lat), np.amax(lat)])
+                cbar = plt.colorbar(label='mm/yr', shrink=0.6)
+                plt.text(0.95, 0.95, "Reconstructed time series",
+                     horizontalalignment='right',
+                     verticalalignment='top',
+                     transform=plt.gca().transAxes,
+                     bbox=dict(facecolor='white', alpha=0.5))
+                
+                plt.subplot2grid((1, 3), (0, 2))
+                plt.plot(dates,ica.mixing_[:,m], label = 'Component time series {}'.format(m))
+                plt.legend()
+                print('Saving component figure at {}/{}'.format(fig_directory, fig))
+                plt.savefig(os.path.join(fig_directory, fig))
+                plt.close()
+    
+    #-----------------------------#
+            # If mean gradient is negative, find the index of the trend with the maximum R-squared value
+            negative_indices = [i for i, val in enumerate(mean_gradient) if val < 0]
+            if negative_indices:
+                median_r_squared_negative_gradients = [median_r_squared[i] for i in negative_indices]
+                max_r_squared_negative_grad = np.max(median_r_squared_negative_gradients)
+                max_index_in_median_r_squared = median_r_squared.index(max_r_squared_negative_grad)
+                
+        	    # Choose the signal
+                inelastic_signal = restored_signals_3d[max_index_in_median_r_squared]
+                inelastic_signal_subsiding = restored_signals_2d[max_index_in_median_r_squared]
+                inelastic_S_ft = ica.mixing_[:,max_index_in_median_r_squared]
+                
+                print('mean_gradient',mean_gradient)
+                print('median_r_squared',median_r_squared)
+                print('median_mae',median_mae)
+                print('mean_second_derivative',mean_second_derivative)
+                
+        	    # Save as NetCDF
+                output_dir = os.path.join(out_dir, approach, f"{ncomponents}_comp", frame)
+    
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+    
+                # Remove all files in the directory
+                for filename in os.listdir(output_dir):
+                    file_path = os.path.join(output_dir, filename)
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)  # Remove the file or link
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)  # Remove the directory and its contents
+                            
+                # cp inelastic png to outputs
+                #shutil.copy(os.path.join(fig_directory, f"{frame}_component_{max_index_in_median_r_squared}.png"),output_dir)
+    
+                print('Saving inelastic component nc and tif at {}'.format(output_dir))
+    
+                output_nc_path = os.path.join(output_dir, f"{frame}_{ncomponents}_components.nc")
+                with nc.Dataset(output_nc_path, 'w') as file:
+                    # Create dimensions
+                    file.createDimension('dates', inelastic_signal.shape[0])
+                    file.createDimension('latitude', inelastic_signal.shape[1])
+                    file.createDimension('longitude', inelastic_signal.shape[2])
+                    
+                    # Create variables
+                    time_var = file.createVariable('dates', np.int32, ('dates',))
+                    lat_var = file.createVariable('latitude', 'f4', ('latitude',))
+                    lon_var = file.createVariable('longitude', 'f4', ('longitude',))
+                    data_var = file.createVariable('inelastic_reconstructed_signals', 'f4', ('dates', 'latitude', 'longitude'))
+                    component_var = file.createVariable('inelastic_component', 'f4', ('dates'))
+                    mae_var = file.createVariable('inelastic_MAE', 'f4')
+                    second_derivative_var = file.createVariable('inelastic_second_derivative', 'f4')
+                    
+                    # Add data to variables
+                    time_var[:] = nc_data
+                    lat_var[:] = lat
+                    lon_var[:] = lon
+                    data_var[:] = inelastic_signal
+                    component_var[:] = inelastic_S_ft
+                    mae_var[:] = median_mae[max_index_in_median_r_squared]
+                    second_derivative_var[:] = mean_second_derivative[max_index_in_median_r_squared]
+    
+                    # Create variables for each component
+                    data_vars = []
+                    component_vars = []
+                    mae_vars = []
+                    second_derivative_vars = []
+                    
+                    for comp_index in range(ncomponents - 1):
+                        data_var = file.createVariable(f'reconstructed_signals_{comp_index}', 'f4', ('dates', 'latitude', 'longitude'))
+                        component_var = file.createVariable(f'component_{comp_index}', 'f4', ('dates'))
+                        mae_var = file.createVariable(f'mae_{comp_index}', 'f4')
+                        second_derivative_var = file.createVariable(f'second_derivative_{comp_index}', 'f4')
+                        
+                        data_vars.append(data_var)
+                        component_vars.append(component_var)
+                        mae_vars.append(mae_var)
+                        second_derivative_vars.append(second_derivative_var)
+    
+                    # Add data, mae, and second derivative to variables
+                    comp_index=0
+                    for i, signal_3d in enumerate(restored_signals_3d):
+                        if i != max_index_in_median_r_squared:
+                            data_vars[comp_index][:] = signal_3d
+                            component_vars[comp_index][:] = ica.mixing_[:,i] 
+                            mae_vars[comp_index][:] = median_mae[i]
+                            second_derivative_vars[comp_index][:] = mean_second_derivative[i]
+                            comp_index += 1
+    
+                # cp elastic png to outputs
+                for i in range(len(restored_signals_3d)):
+                    shutil.copy(os.path.join(fig_directory, f"{frame}_component_{i}.png"), output_dir)
+    
+                print("Saving other component tifs at {}".format(output_dir))
+    
+                # Save as GeoTIFF
+                output_tif_path = os.path.join(output_dir, f"{frame}_inelastic_component_{max_index_in_median_r_squared}.tif")
+    
+                # Create a transformation for the GeoTIFF
+                post_lat_pos = post_lat * (-1)
+                transform = from_origin(corner_lon, corner_lat, post_lon, post_lat_pos)
+    
+                with rasterio.open(output_tif_path, 'w', driver='GTiff', height=height, width=width, count=1,
+                                   dtype='float32', crs='EPSG:4326', transform=transform) as dst:
+                    # Write the data to the GeoTIFF
+                    dst.write(inelastic_signal[-1, :, :], 1)
+                               
+                for i, signal_3d in enumerate(restored_signals_3d):
+                    if i != max_index_in_median_r_squared:
+                        output_tif_path = os.path.join(output_dir, f"{frame}_component_{i}.tif")
+                        with rasterio.open(output_tif_path, 'w', driver='GTiff', height=height, width=width, count=1,
+                                           dtype='float32', crs='EPSG:4326', transform=transform) as dst:
+                            # Write the data to the GeoTIFF
+                            dst.write(signal_3d[-1, :, :], 1)
+
+elif approach == "spatial":
+    # find inelastic component, elastic component, plot things, save nc and tif
+    print("identifying elastic and inelastic components and save outputs")
+    for index, row in frames_gdf.iterrows():
+        frame = row['frame']
+        dates = row['dates']
+        restored_signals_3d = row['restored_signals_3d']
+        restored_signals_2d = row['restored_signals_2d']
+        corner_lat = row['corner_lat']
+        corner_lon = row['corner_lon']
+        post_lon = row['post_lon']
+        post_lat = row['post_lat']
+        width = row['width']
+        height = row['length']
+        lat = row['lat']
+        lon = row['lon']
+        nc_data = row['imdates']
+        Sft = row['S_ft']
+    
+        # Only proceed if there are enough coherent pixels
+        if restored_signals_2d[0].shape[1] >= 20:
+            # List to store R-squared values for each trend
+            mean_gradient = []
+            median_r_squared = []
+            mean_second_derivative = []
+            median_mae = []
+    
+            # Convert dates to numerical values
+            num_dates = date2num(dates)
+    
+            for m, signal in enumerate(restored_signals_2d):
+                r_squared_values = []
+                gradient = []
+                second_deriv = []
+                maes = []
+    
+                # Loop through each trend at each pixel
+                for i in range(signal.shape[1]):
+                    # Perform linear regression and calculate R-squared
+                    slope, _, r_value, _, _ = linregress(num_dates, signal[:, i])
+                    # Store the gradient at each pixel
+                    gradient.append(slope)
+    
+                    # Append R-squared value to the list
+                    r_squared_values.append(r_value ** 2)
+    
+                    # Calculate the second derivative using numpy.gradient at each pixel
+                    first_derivative = np.gradient(signal[:, i], num_dates)
+                    second_derivative = np.gradient(first_derivative, num_dates)
+                    second_derivative_mean = np.mean(second_derivative)
+                    second_deriv.append(second_derivative_mean)
+    
+                    # choose model 1 (annual + L) and then calculate fit useing MAE
+                    yvalues = calc_model(signal[:, i], num_dates, 3)
+                    mae_annual = mean_absolute_error(signal[:, i], yvalues)
+                    maes.append(mae_annual)
+                        
+                # take mean of gradients
+                mean_gradient.append(np.mean(gradient))
+    
+                # take median of r_squared per IC
+                median_r_squared.append(np.median(r_squared_values))
+    
+                # find median mae of fit of model and signal
+                median_mae.append(np.median(maes))
+    
+                # take mean of second derivative per IC
+                mean_second_derivative.append(np.mean(second_deriv))
+    
+                # plot components in space and time with parameters
+                fig = f"{frame}_component_{m}.png"
+                fig_directory = os.path.join(plot_dir, approach, f"{n_components}_components", frame)
+    
+                # Check if the directory exists, if not, create it
+                if not os.path.exists(fig_directory):
+                        os.makedirs(fig_directory)
+                
+                # plot components in space and time with parameters
+                plt.figure(figsize=(16,5))
+                plt.subplot2grid((1, 3), (0, 0))
+                plt.plot(dates,signal)
+                plt.ylabel('Cumulative displacement (mm)')
+    
+                # Adding text to the top right of the plot
+                plt.text(0.95, 0.95, f"Gradient: {np.mean(gradient):.4f}\nR Squared: {np.median(r_squared_values):.4f}\nMAE: {np.median(maes):.4f}\nSecond Derivative: {np.mean(second_deriv):.4f}",
+                     horizontalalignment='right',
+                     verticalalignment='top',
+                     transform=plt.gca().transAxes,
+                     bbox=dict(facecolor='white', alpha=0.5))
+                
+                plt.subplot2grid((1, 3), (0, 1))
+                plt.imshow(restored_signals_3d[m][-1,:,:], cmap='viridis', interpolation='none', extent=[np.amin(lon), np.amax(lon), np.amin(lat), np.amax(lat)])
+                cbar = plt.colorbar(label='mm', shrink=0.6)
+                plt.text(0.95, 0.95, "Reconstructed cumulative displacement",
+                     horizontalalignment='right',
+                     verticalalignment='top',
+                     transform=plt.gca().transAxes,
+                     bbox=dict(facecolor='white', alpha=0.5))
+                
+                plt.subplot2grid((1, 3), (0, 2))
+                plt.plot(dates,S_ft[:,m], label = 'Component time series {}'.format(m))
+                plt.legend()
+                print('Saving component figure at {}/{}'.format(fig_directory, fig))
+                plt.savefig(os.path.join(fig_directory, fig))
+                plt.close()
+    
+    #-----------------------------#
+            # If mean gradient is negative, find the index of the trend with the maximum R-squared value
+            negative_indices = [i for i, val in enumerate(mean_gradient) if val < 0]
+            if negative_indices:
+                median_r_squared_negative_gradients = [median_r_squared[i] for i in negative_indices]
+                max_r_squared_negative_grad = np.max(median_r_squared_negative_gradients)
+                max_index_in_median_r_squared = median_r_squared.index(max_r_squared_negative_grad)
+                
+        	    # Choose the signal
+                inelastic_signal = restored_signals_3d[max_index_in_median_r_squared]
+                inelastic_signal_subsiding = restored_signals_2d[max_index_in_median_r_squared]
+                inelastic_S_ft = S_ft[:,max_index_in_median_r_squared]
+                
+                print('mean_gradient',mean_gradient)
+                print('median_r_squared',median_r_squared)
+                print('median_mae',median_mae)
+                print('mean_second_derivative',mean_second_derivative)
+                
+        	    # Save as NetCDF
+                output_dir = os.path.join(out_dir, approach, f"{ncomponents}_comp", frame)
+    
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+    
+                # Remove all files in the directory
+                for filename in os.listdir(output_dir):
+                    file_path = os.path.join(output_dir, filename)
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)  # Remove the file or link
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)  # Remove the directory and its contents
+                            
+                # cp inelastic png to outputs
+                #shutil.copy(os.path.join(fig_directory, f"{frame}_component_{max_index_in_median_r_squared}.png"),output_dir)
+    
+                print('Saving inelastic component nc and tif at {}'.format(output_dir))
+    
+                output_nc_path = os.path.join(output_dir, f"{frame}_{ncomponents}_components.nc")
+                with nc.Dataset(output_nc_path, 'w') as file:
+                    # Create dimensions
+                    file.createDimension('dates', inelastic_signal.shape[0])
+                    file.createDimension('latitude', inelastic_signal.shape[1])
+                    file.createDimension('longitude', inelastic_signal.shape[2])
+                    
+                    # Create variables
+                    time_var = file.createVariable('dates', np.int32, ('dates',))
+                    lat_var = file.createVariable('latitude', 'f4', ('latitude',))
+                    lon_var = file.createVariable('longitude', 'f4', ('longitude',))
+                    data_var = file.createVariable('inelastic_reconstructed_signals', 'f4', ('dates', 'latitude', 'longitude'))
+                    component_var = file.createVariable('inelastic_component', 'f4', ('dates'))
+                    mae_var = file.createVariable('inelastic_MAE', 'f4')
+                    second_derivative_var = file.createVariable('inelastic_second_derivative', 'f4')
+                    
+                    # Add data to variables
+                    time_var[:] = nc_data
+                    lat_var[:] = lat
+                    lon_var[:] = lon
+                    data_var[:] = inelastic_signal
+                    component_var[:] = inelastic_S_ft
+                    mae_var[:] = median_mae[max_index_in_median_r_squared]
+                    second_derivative_var[:] = mean_second_derivative[max_index_in_median_r_squared]
+    
+                    # Create variables for each component
+                    data_vars = []
+                    component_vars = []
+                    mae_vars = []
+                    second_derivative_vars = []
+                    
+                    for comp_index in range(ncomponents - 1):
+                        data_var = file.createVariable(f'reconstructed_signals_{comp_index}', 'f4', ('dates', 'latitude', 'longitude'))
+                        component_var = file.createVariable(f'component_{comp_index}', 'f4', ('dates'))
+                        mae_var = file.createVariable(f'mae_{comp_index}', 'f4')
+                        second_derivative_var = file.createVariable(f'second_derivative_{comp_index}', 'f4')
+                        
+                        data_vars.append(data_var)
+                        component_vars.append(component_var)
+                        mae_vars.append(mae_var)
+                        second_derivative_vars.append(second_derivative_var)
+    
+                    # Add data, mae, and second derivative to variables
+                    comp_index=0
+                    for i, signal_3d in enumerate(restored_signals_3d):
+                        if i != max_index_in_median_r_squared:
+                            data_vars[comp_index][:] = signal_3d
+                            component_vars[comp_index][:] = S_ft[:,i] 
+                            mae_vars[comp_index][:] = median_mae[i]
+                            second_derivative_vars[comp_index][:] = mean_second_derivative[i]
+                            comp_index += 1
+    
+                # cp elastic png to outputss
+                for i in range(len(restored_signals_3d)):
+                    shutil.copy(os.path.join(fig_directory, f"{frame}_component_{i}.png"), output_dir)
+    
+                print("Saving other component tifs at {}".format(output_dir))
+    
+                # Save as GeoTIFF
+                output_tif_path = os.path.join(output_dir, f"{frame}_inelastic_component_{max_index_in_median_r_squared}.tif")
+    
+                # Create a transformation for the GeoTIFF
+                post_lat_pos = post_lat * (-1)
+                transform = from_origin(corner_lon, corner_lat, post_lon, post_lat_pos)
+    
+                with rasterio.open(output_tif_path, 'w', driver='GTiff', height=height, width=width, count=1,
+                                   dtype='float32', crs='EPSG:4326', transform=transform) as dst:
+                    # Write the data to the GeoTIFF
+                    dst.write(inelastic_signal[-1, :, :], 1)
+                               
+                for i, signal_3d in enumerate(restored_signals_3d):
+                    if i != max_index_in_median_r_squared:
+                        output_tif_path = os.path.join(output_dir, f"{frame}_component_{i}.tif")
+                        with rasterio.open(output_tif_path, 'w', driver='GTiff', height=height, width=width, count=1,
+                                           dtype='float32', crs='EPSG:4326', transform=transform) as dst:
+                            # Write the data to the GeoTIFF
+                            dst.write(signal_3d[-1, :, :], 1)
