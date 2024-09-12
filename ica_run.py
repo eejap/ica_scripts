@@ -27,16 +27,20 @@ import statsmodels.api as sm
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import shutil
 import argparse
+from scipy.stats import skew
+import matplotlib.gridspec as gridspec
+from scipy import stats
+from cmcrameri import cm
 
 # this is Andrew Watson's library of functions, see https://github.com/Active-Tectonics-Leeds/interseismic_practical
 import sys
 import interseis_lib as lib
 
 #---------VARIABLES TO CHANGE--------#
-n_components=4
+n_components=2
 out_dir="/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran_data/outputs/"
 data_dir="/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran_data/"
-plot_dir="/home/users/eejap002/ica_scripts/component_plots/all_iran/"
+plot_dir="/home/users/eejap002/ica_scripts/component_plots/all_iran_data/"
 polygon_dir="/home/users/eejap002/ica_scripts/polygons/"
 approach="temporal" # choose spatial or temporal
 
@@ -44,7 +48,8 @@ print('loading files')
 cumh5_dir = os.path.join(data_dir,"cumh5")
 mask_dir = os.path.join(data_dir,"mask")
 EQA_dir = os.path.join(data_dir,"EQA.dem_par")
-subs_poly_path = os.path.join(data_dir,"vU_merge_161023_noBabRas_WGS84_fillednosmooth_wmean_rad2_dist18_ltemin10_polygonised_dissolved.shp")
+subs_poly_path = os.path.join(polygon_dir,"Iran_subsidence_outlines.shp")
+shapes = gpd.read_file(subs_poly_path)
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Process a Frame.')
@@ -53,7 +58,7 @@ args = parser.parse_args()
 frame= args.frame
 
 #frame='Javin_159A_05389_131313'
-#frame='028A_05385_191813'
+#frame='130A_05394_131213'
 
 #-------------------------------------------#
 # Define the calc_model function
@@ -84,11 +89,11 @@ def calc_model(dph, imdates_ordinal, model):
 #frame is region if running individual region
 frames_data = []
 
-EQA_par_pattern = os.path.join(EQA_dir,f"*{frame}_GEOCml*GACOS*mask_EQA.dem_par")
+EQA_par_pattern = os.path.join(EQA_dir,f"*{frame}_GEOCml*GACOS*mask*_EQA.dem_par")
 EQA_par_file = glob.glob(EQA_par_pattern)
-cumh5_pattern = os.path.join(cumh5_dir,f"*{frame}_GEOCml*GACOS*mask_cum.h5")
+cumh5_pattern = os.path.join(cumh5_dir,f"*{frame}_GEOCml*GACOS*mask*_cum.h5")
 cumh5_file = glob.glob(cumh5_pattern)
-mask_pattern = os.path.join(mask_dir,f"*{frame}_GEOCml*GACOS*mask_coh_03_mask.geo.tif")
+mask_pattern = os.path.join(mask_dir,f"*{frame}_GEOCml*GACOS*mask*_coh_03_mask.geo.tif")
 mask_file = glob.glob(mask_pattern)
 
 with h5py.File(cumh5_file[0], 'r') as file:
@@ -110,7 +115,7 @@ for date_value in imdates:
 
 width = int(lib.get_par(EQA_par_file[0],'width'))
 length = int(lib.get_par(EQA_par_file[0],'nlines'))
-    
+
 # get corner positions
 corner_lat = float(lib.get_par(EQA_par_file[0], 'corner_lat'))
 corner_lon = float(lib.get_par(EQA_par_file[0], 'corner_lon'))
@@ -233,6 +238,8 @@ for index, row in frames_gdf.iterrows():
 frames_gdf["S_ft"] = ""
 frames_gdf["restored_signals_2d"] = ""
 frames_gdf["restored_signals_3d"] = ""
+frames_gdf["weighting_m_2d"] = ""
+frames_gdf["mixing_ts"] = ""
 
 # attempt ICA
 ncomponents=n_components
@@ -254,14 +261,15 @@ for index, row in frames_gdf.iterrows():
         	
             # fit the transformer to the data array
             S_ft = ica.fit_transform(data_to_decompose) # fit model and recover signals
-            #S_t = ica.transform(data) # recover sources from x using unmixing matrix
-            ## S_ft and S_t results should be identical as ica.transform uses mixing matrix calculated by ica.fit_trcd ansform
         
             frames_gdf.at[index, 'S_ft'] = S_ft
         
             # Take each signal and restore with outer product
             restored_signals_outer = []
             three_d_list = []
+            weighting_ms = []
+            all_mixing = []
+            
             for j in range(ncomponents):
                 S_j = np.copy(S_ft)
                 signal = S_j[:,j]
@@ -284,24 +292,31 @@ for index, row in frames_gdf.iterrows():
                 # Create a copy of cum_with_nans to work with for each restored_signal
                 cum_with_nans_copy = cum_with_nans.copy()
 
-                # need to make sure a different time series assigned to timestep ***
+                # need to make sure a different time series assigned to timestep
                 for m in range(restored_signal_j.shape[1]):
                    # Assign values from the restored signal to non-NaN positions
-                    cum_with_nans_copy[m, indices_3d[0], indices_3d[1]] = restored_signal_j[:,m]
+                    cum_with_nans_copy[m, indices_3d[0], indices_3d[1]] = restored_signal_j[:,m]            
                    
-                # for m in range(restored_signal_j.shape[1]):
-                #     # Assign values from the restored signal to non-NaN positions
-                #     cum_with_nans_copy[m, indices_3d[0], indices_3d[1]] = restored_signal_j[:,m]
-        
                 # reshape cum_with_nans into time x pixels
                 cum_with_nans_pix = cum_with_nans_copy.reshape(cum.shape[0], cum.shape[1] * cum.shape[2])
         
                 #reshape cum_with_nans_pix into 3d to save signals
                 restored_signal_3d = cum_with_nans_pix.reshape(cum.shape[0], cum.shape[1], cum.shape[2])
                 three_d_list.append(restored_signal_3d)
-                
+
+                weighting_m = (S_j[:,j])
+                weighting_nans = np.full((cum.shape[1] * cum.shape[2]), np.nan)
+                for j in range(restored_signal_j.shape[1]):
+                    weighting_nans[common_indices] = weighting_m
+                    weighting_m_2d = weighting_nans.reshape(cum.shape[1], cum.shape[2])
+                weighting_ms.append(weighting_m_2d)
+
+                all_mixing.append(mixing)
+                    
             frames_gdf.at[index, 'restored_signals_2d'] = restored_signals_outer   
             frames_gdf.at[index, 'restored_signals_3d'] = three_d_list
+            frames_gdf.at[index, 'weighting_m_2d'] = weighting_ms
+            frames_gdf.at[index, 'mixing_ts'] = all_mixing
         else:
             print("Skipping ICA for frame {} because the number of features is not greater than {}.".format(frame, ncomponents))
     
@@ -315,14 +330,13 @@ for index, row in frames_gdf.iterrows():
         	
             # fit the transformer to the data array
             S_ft = ica.fit_transform(data_to_decompose) # fit model and recover signals
-            #S_t = ica.transform(data) # recover sources from x using unmixing matrix
-            ## S_ft and S_t results should be identical as ica.transform uses mixing matrix calculated by ica.fit_trcd ansform
         
             frames_gdf.at[index, 'S_ft'] = S_ft
         
             # Take each signal and restore with outer product
             restored_signals_outer = []
             three_d_list = []
+            weighting_ms = []
             for j in range(ncomponents):
                 S_j = np.copy(S_ft)
                 signal = S_j[:,j]
@@ -356,15 +370,23 @@ for index, row in frames_gdf.iterrows():
                 #reshape cum_with_nans_pix into 3d to save signals
                 restored_signal_3d = cum_with_nans_pix.reshape(cum.shape[0], cum.shape[1], cum.shape[2])
                 three_d_list.append(restored_signal_3d)
+
+                weighting_m = (S_j[:,j])
+                weighting_ms.append(weighting_m)
                 
             frames_gdf.at[index, 'restored_signals_2d'] = restored_signals_outer   
             frames_gdf.at[index, 'restored_signals_3d'] = three_d_list
+            frames_gdf.at[index, 'weighting_m_2d'] = weighting_ms
         else:
             print("Skipping ICA for frame {} because the number of features is not greater than {}.".format(frame, ncomponents))
 
 if approach == "temporal":
     # find inelastic component, elastic component, plot things, save nc and tif
     print("identifying elastic and inelastic components and save outputs")
+
+    # Initialize the 'gradients' column for all rows
+    frames_gdf["gradients"] = ""
+    
     for index, row in frames_gdf.iterrows():
         frame = row['frame']
         dates = row['dates']
@@ -380,14 +402,17 @@ if approach == "temporal":
         lon = row['lon']
         nc_data = row['imdates']
         Sft = row['S_ft']
+        weighting_matrix = row['weighting_m_2d']
     
         # Only proceed if there are enough coherent pixels
         if restored_signals_3d[0].shape[1] >= 20:
             # List to store R-squared values for each trend
-            mean_gradient = []
+            median_gradient = []
             median_r_squared = []
-            mean_second_derivative = []
+            median_second_derivative = []
             median_mae = []
+            gradient_skew = []
+            gradients_all = []
     
             # Convert dates to numerical values
             num_dates = date2num(dates)
@@ -415,16 +440,23 @@ if approach == "temporal":
                     # Calculate the second derivative using numpy.gradient at each pixel
                     first_derivative = np.gradient(signal[:, i], num_dates)
                     second_derivative = np.gradient(first_derivative, num_dates)
-                    second_derivative_mean = np.mean(second_derivative)
-                    second_deriv.append(second_derivative_mean)
+                    second_derivative_median = np.median(second_derivative)
+                    second_deriv.append(second_derivative_median)
     
                     # choose model 1 (annual + L) and then calculate fit useing MAE
                     yvalues = calc_model(signal[:, i], num_dates, 3)
                     mae_annual = mean_absolute_error(signal[:, i], yvalues)
                     maes.append(mae_annual)
+
+                # take median of gradients
+                median_gradient.append(np.median(gradient))
                         
-                # take mean of gradients
-                mean_gradient.append(np.mean(gradient))
+                # take median of gradients
+                median_gradient.append(np.median(gradient))
+                
+                # calculate skew of the gradients per time-series to find one with biggest tail: likely to be inelastic
+                skew_comp = skew(gradient)
+                gradient_skew.append(skew_comp)
     
                 # take median of r_squared per IC
                 median_r_squared.append(np.median(r_squared_values))
@@ -432,8 +464,10 @@ if approach == "temporal":
                 # find median mae of fit of model and signal
                 median_mae.append(np.median(maes))
     
-                # take mean of second derivative per IC
-                mean_second_derivative.append(np.mean(second_deriv))
+                # take median of second derivative per IC
+                median_second_derivative.append(np.median(second_deriv))
+
+                gradients_all.append(gradient)
     
                 # plot components in space and time with parameters
                 fig = f"{frame}_component_{m}.png"
@@ -444,50 +478,56 @@ if approach == "temporal":
                         os.makedirs(fig_directory)
                 
                 # plot components in space and time with parameters
-                plt.figure(figsize=(16,5))
-                plt.subplot2grid((1, 3), (0, 0))
+                plt.figure(figsize=(20,5))
+                plt.subplot2grid((1, 4), (0, 0))
                 plt.plot(dates,signal)
     
                 # Adding text to the top right of the plot
-                plt.text(0.95, 0.95, f"Gradient: {np.mean(gradient):.4f}\nR Squared: {np.median(r_squared_values):.4f}\nMAE: {np.median(maes):.4f}\nSecond Derivative: {np.mean(second_deriv):.4f}",
+                plt.text(0.95, 0.95, f"Med gradient: {np.median(gradient):.4f}\nR Squared: {np.median(r_squared_values):.4f}\nMAE: {np.median(maes):.4f}\nSecond Derivative: {np.median(second_deriv):.4f}\nGrad skew: {skew_comp:.2f}",
                      horizontalalignment='right',
                      verticalalignment='top',
                      transform=plt.gca().transAxes,
                      bbox=dict(facecolor='white', alpha=0.5))
                 
-                plt.subplot2grid((1, 3), (0, 1))
+                plt.subplot2grid((1, 4), (0, 1))
                 plt.imshow(restored_signals_3d[m][-1,:,:], cmap='viridis', interpolation='none', extent=[np.amin(lon), np.amax(lon), np.amin(lat), np.amax(lat)])
-                cbar = plt.colorbar(label='mm/yr', shrink=0.6)
+                cbar = plt.colorbar(label='mm', shrink=0.6)
                 plt.text(0.95, 0.95, "Reconstructed time series",
                      horizontalalignment='right',
                      verticalalignment='top',
                      transform=plt.gca().transAxes,
                      bbox=dict(facecolor='white', alpha=0.5))
                 
-                plt.subplot2grid((1, 3), (0, 2))
+                plt.subplot2grid((1, 4), (0, 2))
                 plt.plot(dates,ica.mixing_[:,m], label = 'Component time series {}'.format(m))
-                plt.legend()
+                plt.legend()                
+                
+                plt.subplot2grid((1, 4), (0, 3))
+                plt.imshow(weighting_matrix[m], cmap='viridis', interpolation='none', extent=[np.amin(lon), np.amax(lon), np.amin(lat), np.amax(lat)])
+                cbar = plt.colorbar(label='Weight', shrink=0.6)
                 print('Saving component figure at {}/{}'.format(fig_directory, fig))
                 plt.savefig(os.path.join(fig_directory, fig))
                 plt.close()
-    
+
+            frames_gdf.at[index, 'gradients'] = gradients_all
+        
     #-----------------------------#
-            # If mean gradient is negative, find the index of the trend with the maximum R-squared value
-            negative_indices = [i for i, val in enumerate(mean_gradient) if val < 0]
-            if negative_indices:
-                median_r_squared_negative_gradients = [median_r_squared[i] for i in negative_indices]
-                max_r_squared_negative_grad = np.max(median_r_squared_negative_gradients)
-                max_index_in_median_r_squared = median_r_squared.index(max_r_squared_negative_grad)
+            negative_skew = [i for i, val in enumerate(gradient_skew) if val < 0]
+            if negative_skew:
+                median_r_squared_negative_skew = [median_r_squared[i] for i in negative_skew]
+                max_r_squared_negative_skew = np.max(median_r_squared_negative_skew)
+                max_index_in_median_r_squared = median_r_squared.index(max_r_squared_negative_skew)
                 
         	    # Choose the signal
                 inelastic_signal = restored_signals_3d[max_index_in_median_r_squared]
                 inelastic_signal_subsiding = restored_signals_2d[max_index_in_median_r_squared]
                 inelastic_S_ft = ica.mixing_[:,max_index_in_median_r_squared]
                 
-                print('mean_gradient',mean_gradient)
+                print('median_gradient',median_gradient)
                 print('median_r_squared',median_r_squared)
                 print('median_mae',median_mae)
-                print('mean_second_derivative',mean_second_derivative)
+                print('median_second_derivative',median_second_derivative)
+                print('gradient_skew',gradient_skew)
                 
         	    # Save as NetCDF
                 output_dir = os.path.join(out_dir, approach, f"{ncomponents}_comp", frame)
@@ -520,6 +560,8 @@ if approach == "temporal":
                     lat_var = file.createVariable('latitude', 'f4', ('latitude',))
                     lon_var = file.createVariable('longitude', 'f4', ('longitude',))
                     data_var = file.createVariable('inelastic_reconstructed_signals', 'f4', ('dates', 'latitude', 'longitude'))
+                    weighting_matrix_var = file.createVariable('inelastic_weighting_matrix', 'f4', ('latitude', 'longitude'))
+                    
                     component_var = file.createVariable('inelastic_component', 'f4', ('dates'))
                     mae_var = file.createVariable('inelastic_MAE', 'f4')
                     second_derivative_var = file.createVariable('inelastic_second_derivative', 'f4')
@@ -529,23 +571,27 @@ if approach == "temporal":
                     lat_var[:] = lat
                     lon_var[:] = lon
                     data_var[:] = inelastic_signal
+                    weighting_matrix_var[:] = weighting_matrix[max_index_in_median_r_squared]
                     component_var[:] = inelastic_S_ft
                     mae_var[:] = median_mae[max_index_in_median_r_squared]
-                    second_derivative_var[:] = mean_second_derivative[max_index_in_median_r_squared]
+                    second_derivative_var[:] = median_second_derivative[max_index_in_median_r_squared]
     
                     # Create variables for each component
                     data_vars = []
+                    weighting_matrix_vars =[]
                     component_vars = []
                     mae_vars = []
                     second_derivative_vars = []
                     
                     for comp_index in range(ncomponents - 1):
                         data_var = file.createVariable(f'reconstructed_signals_{comp_index}', 'f4', ('dates', 'latitude', 'longitude'))
+                        weighting_matrix_var = file.createVariable(f'weighting_matrix_{comp_index}', 'f4', ('latitude', 'longitude'))
                         component_var = file.createVariable(f'component_{comp_index}', 'f4', ('dates'))
                         mae_var = file.createVariable(f'mae_{comp_index}', 'f4')
                         second_derivative_var = file.createVariable(f'second_derivative_{comp_index}', 'f4')
                         
                         data_vars.append(data_var)
+                        weighting_matrix_vars.append(weighting_matrix_var)
                         component_vars.append(component_var)
                         mae_vars.append(mae_var)
                         second_derivative_vars.append(second_derivative_var)
@@ -555,9 +601,10 @@ if approach == "temporal":
                     for i, signal_3d in enumerate(restored_signals_3d):
                         if i != max_index_in_median_r_squared:
                             data_vars[comp_index][:] = signal_3d
+                            weighting_matrix_vars[comp_index][:] = weighting_matrix[i]
                             component_vars[comp_index][:] = ica.mixing_[:,i] 
                             mae_vars[comp_index][:] = median_mae[i]
-                            second_derivative_vars[comp_index][:] = mean_second_derivative[i]
+                            second_derivative_vars[comp_index][:] = median_second_derivative[i]
                             comp_index += 1
     
                 # cp elastic png to outputs
@@ -571,7 +618,8 @@ if approach == "temporal":
     
                 # Create a transformation for the GeoTIFF
                 post_lat_pos = post_lat * (-1)
-                transform = from_origin(corner_lon, corner_lat, post_lon, post_lat_pos)
+                transform = from_origin(corner_lon-post_lon/2, corner_lat+post_lat_pos/2, post_lon, post_lat_pos)
+                # was just corner_lon, corner_lat
     
                 with rasterio.open(output_tif_path, 'w', driver='GTiff', height=height, width=width, count=1,
                                    dtype='float32', crs='EPSG:4326', transform=transform) as dst:
@@ -589,6 +637,10 @@ if approach == "temporal":
 elif approach == "spatial":
     # find inelastic component, elastic component, plot things, save nc and tif
     print("identifying elastic and inelastic components and save outputs")
+
+    # Initialize the 'gradients' column for all rows
+    frames_gdf["gradients"] = ""
+    
     for index, row in frames_gdf.iterrows():
         frame = row['frame']
         dates = row['dates']
@@ -604,14 +656,17 @@ elif approach == "spatial":
         lon = row['lon']
         nc_data = row['imdates']
         Sft = row['S_ft']
+        weighting_matrix = row['weighting_m_2d']
     
         # Only proceed if there are enough coherent pixels
         if restored_signals_2d[0].shape[1] >= 20:
             # List to store R-squared values for each trend
-            mean_gradient = []
+            median_gradient = []
             median_r_squared = []
-            mean_second_derivative = []
+            median_second_derivative = []
             median_mae = []
+            gradient_skew = []
+            gradients_all = []
     
             # Convert dates to numerical values
             num_dates = date2num(dates)
@@ -626,6 +681,7 @@ elif approach == "spatial":
                 for i in range(signal.shape[1]):
                     # Perform linear regression and calculate R-squared
                     slope, _, r_value, _, _ = linregress(num_dates, signal[:, i])
+                    
                     # Store the gradient at each pixel
                     gradient.append(slope)
     
@@ -635,16 +691,20 @@ elif approach == "spatial":
                     # Calculate the second derivative using numpy.gradient at each pixel
                     first_derivative = np.gradient(signal[:, i], num_dates)
                     second_derivative = np.gradient(first_derivative, num_dates)
-                    second_derivative_mean = np.mean(second_derivative)
-                    second_deriv.append(second_derivative_mean)
+                    second_derivative_median = np.median(second_derivative)
+                    second_deriv.append(second_derivative_median)
     
                     # choose model 1 (annual + L) and then calculate fit useing MAE
                     yvalues = calc_model(signal[:, i], num_dates, 3)
                     mae_annual = mean_absolute_error(signal[:, i], yvalues)
                     maes.append(mae_annual)
                         
-                # take mean of gradients
-                mean_gradient.append(np.mean(gradient))
+                # take median of gradients
+                median_gradient.append(np.median(gradient))
+                
+                # calculate skew of the gradients per time-series to find one with biggest tail: likely to be inelastic
+                skew_comp = skew(gradient)
+                gradient_skew.append(skew_comp)
     
                 # take median of r_squared per IC
                 median_r_squared.append(np.median(r_squared_values))
@@ -652,8 +712,10 @@ elif approach == "spatial":
                 # find median mae of fit of model and signal
                 median_mae.append(np.median(maes))
     
-                # take mean of second derivative per IC
-                mean_second_derivative.append(np.mean(second_deriv))
+                # take median of second derivative per IC
+                median_second_derivative.append(np.median(second_deriv))
+
+                gradients_all.append(gradient)
     
                 # plot components in space and time with parameters
                 fig = f"{frame}_component_{m}.png"
@@ -664,13 +726,13 @@ elif approach == "spatial":
                         os.makedirs(fig_directory)
                 
                 # plot components in space and time with parameters
-                plt.figure(figsize=(16,5))
+                plt.figure(figsize=(20,5))
                 plt.subplot2grid((1, 3), (0, 0))
                 plt.plot(dates,signal)
                 plt.ylabel('Cumulative displacement (mm)')
     
                 # Adding text to the top right of the plot
-                plt.text(0.95, 0.95, f"Gradient: {np.mean(gradient):.4f}\nR Squared: {np.median(r_squared_values):.4f}\nMAE: {np.median(maes):.4f}\nSecond Derivative: {np.mean(second_deriv):.4f}",
+                plt.text(0.95, 0.95, f"Gradient: {np.median(gradient):.4f}\nR Squared: {np.median(r_squared_values):.4f}\nMAE: {np.median(maes):.4f}\nSecond Derivative: {np.median(second_deriv):.4f}",
                      horizontalalignment='right',
                      verticalalignment='top',
                      transform=plt.gca().transAxes,
@@ -691,24 +753,25 @@ elif approach == "spatial":
                 print('Saving component figure at {}/{}'.format(fig_directory, fig))
                 plt.savefig(os.path.join(fig_directory, fig))
                 plt.close()
-    
+                
+            frames_gdf.at[index, 'gradients'] = gradients_all
     #-----------------------------#
-            # If mean gradient is negative, find the index of the trend with the maximum R-squared value
-            negative_indices = [i for i, val in enumerate(mean_gradient) if val < 0]
-            if negative_indices:
-                median_r_squared_negative_gradients = [median_r_squared[i] for i in negative_indices]
-                max_r_squared_negative_grad = np.max(median_r_squared_negative_gradients)
-                max_index_in_median_r_squared = median_r_squared.index(max_r_squared_negative_grad)
+            # Find component with most negative skew of time series gradients = inelastic signal
+            negative_skew = [i for i, val in enumerate(gradient_skew) if val < 0]
+            if negative_skew:
+                median_r_squared_negative_skew = [median_r_squared[i] for i in negative_skew]
+                max_r_squared_negative_skew = np.max(median_r_squared_negative_skew)
+                max_index_in_median_r_squared = median_r_squared.index(max_r_squared_negative_skew)
                 
         	    # Choose the signal
                 inelastic_signal = restored_signals_3d[max_index_in_median_r_squared]
                 inelastic_signal_subsiding = restored_signals_2d[max_index_in_median_r_squared]
                 inelastic_S_ft = S_ft[:,max_index_in_median_r_squared]
                 
-                print('mean_gradient',mean_gradient)
+                print('median_gradient',median_gradient)
                 print('median_r_squared',median_r_squared)
                 print('median_mae',median_mae)
-                print('mean_second_derivative',mean_second_derivative)
+                print('median_second_derivative',median_second_derivative)
                 
         	    # Save as NetCDF
                 output_dir = os.path.join(out_dir, approach, f"{ncomponents}_comp", frame)
@@ -723,9 +786,6 @@ elif approach == "spatial":
                         os.unlink(file_path)  # Remove the file or link
                     elif os.path.isdir(file_path):
                         shutil.rmtree(file_path)  # Remove the directory and its contents
-                            
-                # cp inelastic png to outputs
-                #shutil.copy(os.path.join(fig_directory, f"{frame}_component_{max_index_in_median_r_squared}.png"),output_dir)
     
                 print('Saving inelastic component nc and tif at {}'.format(output_dir))
     
@@ -741,6 +801,8 @@ elif approach == "spatial":
                     lat_var = file.createVariable('latitude', 'f4', ('latitude',))
                     lon_var = file.createVariable('longitude', 'f4', ('longitude',))
                     data_var = file.createVariable('inelastic_reconstructed_signals', 'f4', ('dates', 'latitude', 'longitude'))
+                    weighting_matrix_var = file.createVariable('inelastic_weighting_matrix', 'f4', ('dates'))
+
                     component_var = file.createVariable('inelastic_component', 'f4', ('dates'))
                     mae_var = file.createVariable('inelastic_MAE', 'f4')
                     second_derivative_var = file.createVariable('inelastic_second_derivative', 'f4')
@@ -751,22 +813,26 @@ elif approach == "spatial":
                     lon_var[:] = lon
                     data_var[:] = inelastic_signal
                     component_var[:] = inelastic_S_ft
+                    weighting_matrix_var[:] = weighting_matrix[max_index_in_median_r_squared]
                     mae_var[:] = median_mae[max_index_in_median_r_squared]
-                    second_derivative_var[:] = mean_second_derivative[max_index_in_median_r_squared]
+                    second_derivative_var[:] = median_second_derivative[max_index_in_median_r_squared]
     
                     # Create variables for each component
                     data_vars = []
+                    weighting_matrix_vars =[]
                     component_vars = []
                     mae_vars = []
                     second_derivative_vars = []
                     
                     for comp_index in range(ncomponents - 1):
                         data_var = file.createVariable(f'reconstructed_signals_{comp_index}', 'f4', ('dates', 'latitude', 'longitude'))
+                        weighting_matrix_var = file.createVariable(f'weighting_matrix_{comp_index}', 'f4', ('dates'))
                         component_var = file.createVariable(f'component_{comp_index}', 'f4', ('dates'))
                         mae_var = file.createVariable(f'mae_{comp_index}', 'f4')
                         second_derivative_var = file.createVariable(f'second_derivative_{comp_index}', 'f4')
                         
                         data_vars.append(data_var)
+                        weighting_matrix_vars.append(weighting_matrix_var)
                         component_vars.append(component_var)
                         mae_vars.append(mae_var)
                         second_derivative_vars.append(second_derivative_var)
@@ -776,9 +842,10 @@ elif approach == "spatial":
                     for i, signal_3d in enumerate(restored_signals_3d):
                         if i != max_index_in_median_r_squared:
                             data_vars[comp_index][:] = signal_3d
+                            weighting_matrix_vars[comp_index][:] = weighting_matrix[i]
                             component_vars[comp_index][:] = S_ft[:,i] 
                             mae_vars[comp_index][:] = median_mae[i]
-                            second_derivative_vars[comp_index][:] = mean_second_derivative[i]
+                            second_derivative_vars[comp_index][:] = median_second_derivative[i]
                             comp_index += 1
     
                 # cp elastic png to outputss
@@ -792,7 +859,7 @@ elif approach == "spatial":
     
                 # Create a transformation for the GeoTIFF
                 post_lat_pos = post_lat * (-1)
-                transform = from_origin(corner_lon, corner_lat, post_lon, post_lat_pos)
+                transform = from_origin(corner_lon-post_lon/2, corner_lat+post_lat_pos/2, post_lon, post_lat_pos)
     
                 with rasterio.open(output_tif_path, 'w', driver='GTiff', height=height, width=width, count=1,
                                    dtype='float32', crs='EPSG:4326', transform=transform) as dst:
