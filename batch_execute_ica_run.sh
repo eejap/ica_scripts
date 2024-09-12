@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -p par-single
-#SBATCH -o sbatch_logs/ica_run_2_comp.out
-#SBATCH -e sbatch_logs/ica_run_2_comp.err
+#SBATCH -o ica_run_2_comp.out
+#SBATCH -e ica_run_2_comp.err
 #SBATCH -t 1:00:00  # Adjust the time limit as needed
 #SBATCH --mem 20GB
 #SBATCH --ntasks 1
