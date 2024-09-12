@@ -1,7 +1,7 @@
 ### Instructions to run FastICA for subsidence on several LiCS frames ###
 
-1. Run LiCSBAS for your frames of interest \\
-  a. Use at coherence mask threshold of at least 0.3 \\
+1. Run LiCSBAS for your frames of interest \
+  a. Use at coherence mask threshold of at least 0.3 \
 
 2. Organise your inputs for ICA based on outputs from LiCSBAS \\
   a. Create a data_dir and specify path in ica_run.py. This is where you store your inputs for ICA. \\
