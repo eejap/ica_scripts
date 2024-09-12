@@ -1,9 +1,9 @@
 # ICA of subsidence InSAR time series
 
-This code executes ICA on LiCSBAS InSAR time series analysis outputs.
+This code executes ICA on LiCSBAS InSAR time series analysis outputs that focus on regions of subsidence.
 
 Following ICA, inelastic components of subsidence are identified.
 
-Identified components are saved in a netCDF file as well as tif files.
+All identified components are reconstructed and saved in a netCDF file, along with several other parameters.
 
 This release accompanies work by Payne et al., submitted to JGR Solid Earth.
