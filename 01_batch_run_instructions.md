@@ -15,13 +15,13 @@
       bb. mask.tif --> ${data}\_dir/mask/${frame}\_GEOCml\*GACOS\*mask\*\_coh\_03\_mask.geo.tif    n.b./ create this using LiCSBAS_flt2geotiff.py \
       cc. EQA.dem_par --> ${data}\_dir/EQA.dem_par/${frame}GEOCml\*GACOS\*mask\*\_EQA.dem_par   n.b./ this is found in the relevant GEOCml* directory \
 
-3. Ensure you are running on slurm scheduler or similar that runs batch processing
-  a. Edit batch_execute_ica_run.sh to suit your batch processing system
-  b. Edit execute_ica_run.sh to choose the list of LiCS frames for which you want to perform ICA (FRAMES_LIST)
-  c. Edit VARIABLES TO CHANGE in ica_run.py to choose:
-      aa. Number of components to isolate (n_components)
-      bb. Temporal or spatial ICA (refer to Ebmeier et al 2016)
-      cc. Again ensure directory paths are correct
+3. Ensure you are running on slurm scheduler or similar that runs batch processing \
+  a. Edit batch_execute_ica_run.sh to suit your batch processing system \
+  b. Edit execute_ica_run.sh to choose the list of LiCS frames for which you want to perform ICA (FRAMES_LIST) \
+  c. Edit VARIABLES TO CHANGE in ica_run.py to choose: \
+      aa. Number of components to isolate (n_components) \
+      bb. Temporal or spatial ICA (refer to Ebmeier et al 2016) \
+      cc. Again ensure directory paths are correct \
 
-4. Finally, run the batch script in command line:
+4. Finally, run the batch script in command line: \
 sbatch batch_execture_ica_run.sh
