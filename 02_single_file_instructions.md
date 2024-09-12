@@ -6,7 +6,8 @@
    a. Number of components to isolate (n_components)
    b. Temporal or spatial ICA (refer to Ebmeier et al 2016)
    c. Ensure directory paths are correct
+   d. Write the name of the frame you are using (frame=)
 
-3. Ensure all relevant python modules are installed
+4. Ensure all relevant python modules are installed
 
-4. Run ica_run.ipynb in a jupyter notebook setting
+5. Run ica_run.ipynb in a jupyter notebook setting
