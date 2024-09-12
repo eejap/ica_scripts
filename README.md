@@ -14,7 +14,7 @@ Independent component (IC) 2 is identified by the skew of the gradients as the i
 ![086A_05410_131313_output_demonstration_labels](https://github.com/user-attachments/assets/94d8b57f-e5f8-4a3e-b5c5-9bde9ddf06b5)
 
 # Citations
-
+Payne, J. A.; Watson, A.; Maghsoudi, Y.; Lazecký, Milan; Watson, C. S.; Elliot, J. R. Nationwide assessment of subsidence induced hazard in Iran using Sentinel-1 InSAR. *AGU Fall Meetings Abstracts*. **2023**, NS32A-04.
 
 # Acknowledgements
 This work has been accomplished during Jessica Payne’s PhD at the University of Leeds, funded by SENSE CDT studentship.
@@ -24,10 +24,10 @@ COMET is the UK Natural Environment Research Council's Centre for the Observatio
 The Scientific Colour Maps (Crameri, 2018) is used in LiCSBAS.
 
 # References
-Morishita, Y.; Lazecky, M.; Wright, T.J.; Weiss, J.R.; Elliott, J.R.; Hooper, A. LiCSBAS: An Open-Source InSAR Time Series Analysis Package Integrated with the LiCSAR Automated Sentinel-1 InSAR Processor. Remote Sens. 2020, 12, 424, https://doi.org/10.3390/RS12030424 (Remote Sensing 2022 Best Paper Award).
+Lazecký, M.; Spaans, K.; González, P.J.; Maghsoudi, Y.; Morishita, Y.; Albino, F.; Elliott, J.; Greenall, N.; Hatton, E.; Hooper, A.; Juncu, D.; McDougall, A.; Walters, R.J.; Watson, C.S.; Weiss, J.R.; Wright, T.J. LiCSAR: An Automatic InSAR Tool for Measuring and Monitoring Tectonic and Volcanic Activity. *Remote Sens*. **2020**, 12, 2430, https://doi.org/10.3390/rs12152430.
 
-Lazecký, M.; Spaans, K.; González, P.J.; Maghsoudi, Y.; Morishita, Y.; Albino, F.; Elliott, J.; Greenall, N.; Hatton, E.; Hooper, A.; Juncu, D.; McDougall, A.; Walters, R.J.; Watson, C.S.; Weiss, J.R.; Wright, T.J. LiCSAR: An Automatic InSAR Tool for Measuring and Monitoring Tectonic and Volcanic Activity. Remote Sens. 2020, 12, 2430, https://doi.org/10.3390/rs12152430.
+Morishita, Y.; Lazecky, M.; Wright, T.J.; Weiss, J.R.; Elliott, J.R.; Hooper, A. LiCSBAS: An Open-Source InSAR Time Series Analysis Package Integrated with the LiCSAR Automated Sentinel-1 InSAR Processor. *Remote Sens*. **2020**, 12, 424, https://doi.org/10.3390/RS12030424 (Remote Sensing 2022 Best Paper Award).
 
-FastICA
+Hyvarinen, A. & Oja, E. Indepedent component analysis: algorithms and applications. *Neural Networks*. **2000**, 13, 4, https://doi.org/10.1016/S0893-6080(00)00026-5
 
-Susi paper
+Ebmeier, S. K. Application of independent component analysis to multitemporal InSAR data with volcanic case studies. *JGR: Solid Earth*. **2016**, 121, 12, https://doi.org/10.1002/2016JB013765.
