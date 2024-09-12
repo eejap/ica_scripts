@@ -11,9 +11,9 @@
       bb. $data_dir/mask
       cc. $data_dir/EQA.dem_par
   d. Save your LiCSBAS outputs in these directories with the below structures
-      aa. cum.h5 --> $data_dir/cumh5/${frame}\_GEOCml\*GACOS\*_cum.h5                       n.b./ this is found in the TS_GEOCml* directory
-      bb. mask.tif --> $data_dir/mask/${frame}\_GEOCml\*GACOS\*mask\*_coh_03_mask.geo.tif    n.b./ create this using LiCSBAS_flt2geotiff.py
-      cc. EQA.dem_par --> $data_dir/EQA.dem_par/${frame}GEOCml\*GACOS\*mask\*_EQA.dem_par   n.b./ this is found in the relevant GEOCml* directory
+      aa. cum.h5 --> ${data}\_dir/cumh5/${frame}\_GEOCml\*GACOS\*_cum.h5                       n.b./ this is found in the TS_GEOCml* directory
+      bb. mask.tif --> ${data}\_dir/mask/${frame}\_GEOCml\*GACOS\*mask\*_coh_03_mask.geo.tif    n.b./ create this using LiCSBAS_flt2geotiff.py
+      cc. EQA.dem_par --> ${data}\_dir/EQA.dem_par/${frame}GEOCml\*GACOS\*mask\*_EQA.dem_par   n.b./ this is found in the relevant GEOCml* directory
 
 3. Ensure you are running on slurm scheduler or similar that runs batch processing
   a. Edit batch_execute_ica_run.sh to suit your batch processing system
