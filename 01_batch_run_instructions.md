@@ -7,7 +7,7 @@
   a. Create a data_dir and specify path in ica_run.py. This is where you store your inputs for ICA. \
   b. Create an out_dir and specify path in ica_run.py. This is where your outputs from ICA will be saved. \
   c. Create several directories within the data_dir: \
-      aa. \$data_dir/cumh5 \
+    aa. \$data_dir/cumh5 \
       bb. \$data_dir/mask \
       cc. \$data_dir/EQA.dem\_par \
   d. Save your LiCSBAS outputs in these directories with the below structures \
