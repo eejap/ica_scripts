@@ -38,18 +38,16 @@ import interseis_lib as lib
 
 #---------VARIABLES TO CHANGE--------#
 n_components=2
-out_dir="/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran_data/outputs/"
-data_dir="/gws/nopw/j04/nceo_geohazards_vol1/projects/COMET/eejap002/ica_data/all_iran_data/"
-plot_dir="/home/users/eejap002/ica_scripts/component_plots/all_iran_data/"
-polygon_dir="/home/users/eejap002/ica_scripts/polygons/"
+out_dir="/ica_data/all_iran_data/outputs/"
+data_dir="/ica_data/all_iran_data/"
+plot_dir="/ica_scripts/component_plots/all_iran_data/"
+
 approach="temporal" # choose spatial or temporal
 
 print('loading files')
 cumh5_dir = os.path.join(data_dir,"cumh5")
 mask_dir = os.path.join(data_dir,"mask")
 EQA_dir = os.path.join(data_dir,"EQA.dem_par")
-subs_poly_path = os.path.join(polygon_dir,"Iran_subsidence_outlines.shp")
-shapes = gpd.read_file(subs_poly_path)
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Process a Frame.')
