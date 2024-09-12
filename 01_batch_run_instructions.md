@@ -11,8 +11,8 @@
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bb. \$data_dir/mask \
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cc. \$data_dir/EQA.dem\_par \
   d. Save your LiCSBAS outputs in these directories with the below structures \
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aa. cum.h5 --> ${data}\_dir/cumh5/${frame}\_GEOCml\*GACOS\*\_cum.h5&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;n.b./ this is found in the TS_GEOCml* directory \
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bb. mask.tif --> ${data}\_dir/mask/${frame}\_GEOCml\*GACOS\*mask\*\_coh\_03\_mask.geo.tif&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;n.b./ create this using LiCSBAS_flt2geotiff.py \
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aa. cum.h5 --> ${data}\_dir/cumh5/${frame}\_GEOCml\*GACOS\*\_cum.h5&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;n.b./ this is found in the TS_GEOCml* directory \
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bb. mask.tif --> ${data}\_dir/mask/${frame}\_GEOCml\*GACOS\*mask\*\_coh\_03\_mask.geo.tif&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;n.b./ create this using LiCSBAS_flt2geotiff.py \
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cc. EQA.dem_par --> ${data}\_dir/EQA.dem_par/${frame}GEOCml\*GACOS\*mask\*\_EQA.dem_par&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;n.b./ this is found in the relevant GEOCml* directory
 
 3. Ensure you are running on slurm scheduler or similar that runs batch processing \
