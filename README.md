@@ -11,7 +11,7 @@ This release accompanies work by Payne et al., submitted to JGR Solid Earth.
 Below demonstrates an exmample output using 5 components and temporal ICA on ascending LiCS frame 086A_05410_131313, 2016-2022, in north-east Iran.
 Independent component (IC) 2 is identified by the skew of the gradients as the inelastic component of subsidence.
 
-![086A_05410_131313_output_demonstration_labels](https://github.com/user-attachments/assets/5218a1d0-2f18-496a-9331-3ddb76e59559)
+![086A_05410_131313_output_demonstration_labels](https://github.com/user-attachments/assets/83542d5b-a270-4e1f-babe-cb563b98f97b)
 
 ## Citations
 Payne, J. A.; Watson, A.; Maghsoudi, Y.; Lazecký, Milan; Watson, C. S.; Elliot, J. R. Nationwide assessment of subsidence induced hazard in Iran using Sentinel-1 InSAR. *AGU Fall Meetings Abstracts*. **2023**, NS32A-04.
